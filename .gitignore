@@ -1,1 +1,9 @@
+build/bin
+node_modules
+frontend/dist
+
+dev-docs/
+
+.go*
+.cache
 .DS_Store

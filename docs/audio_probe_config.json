@@ -1,0 +1,12 @@
+{
+  "modelsDir": "./assets/models/essentia",
+  "onnxRuntimePath": "../bm25-search1/assets/lib/libonnxruntime/macos-arm64/libonnxruntime.dylib",
+  "ffmpegPath": "ffmpeg",
+  "melMode": "official",
+  "includeRawVectors": false,
+  "includePatchRows": true,
+  "maxPatchRows": 8,
+  "includeEmbeddings": false,
+  "includeGenrePatchDebug": true,
+  "includeTempoDebug": true
+}
