@@ -38,6 +38,8 @@ func main() {
 		err = installMiniLM(ctx)
 	case "onnxruntime":
 		err = installONNXRuntime(ctx)
+	case "essentia":
+		err = installEssentia(ctx)
 	case "stage":
 		err = stageCommand(os.Args[2:])
 	default:
@@ -51,7 +53,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: go run ./cmd/ray_deps <check|ffmpeg|minilm|onnxruntime|stage>")
+	fmt.Fprintln(os.Stderr, "usage: go run ./cmd/ray_deps <check|ffmpeg|minilm|onnxruntime|essentia|stage>")
 	fmt.Fprintln(os.Stderr, "       go run ./cmd/ray_deps ffmpeg --install")
 	fmt.Fprintln(os.Stderr, "       go run ./cmd/ray_deps stage --build-dir build/bin")
 }
@@ -161,6 +163,15 @@ func installONNXRuntime(ctx context.Context) error {
 	return nil
 }
 
+func installEssentia(ctx context.Context) error {
+	dir, err := runtimeassets.EnsureEssentia(ctx, "")
+	if err != nil {
+		return err
+	}
+	fmt.Println("Essentia models ready:", dir)
+	return nil
+}
+
 func stageCommand(args []string) error {
 	fs := flag.NewFlagSet("stage", flag.ContinueOnError)
 	buildDir := fs.String("build-dir", filepath.Join("build", "bin"), "Wails build output directory")
@@ -169,7 +180,8 @@ func stageCommand(args []string) error {
 		return err
 	}
 
-	if _, err := rayonnx.ResolveEssentiaModelDir(filepath.Join("assets", "models", "essentia")); err != nil {
+	essentiaSource, err := rayonnx.ResolveEssentiaModelDir("")
+	if err != nil {
 		return fmt.Errorf("stage Essentia models: %w", err)
 	}
 	managedMiniLMDir, err := appdirs.ManagedMiniLMDir()
@@ -206,7 +218,7 @@ func stageCommand(args []string) error {
 		return err
 	}
 	if err := copyTree(
-		filepath.Join("assets", "models", "essentia"),
+		essentiaSource,
 		essentiaDst,
 		func(path string) bool {
 			ext := strings.ToLower(filepath.Ext(path))

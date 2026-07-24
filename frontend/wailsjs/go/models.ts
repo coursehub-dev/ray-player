@@ -126,6 +126,7 @@ export namespace deps {
 	export class SettingsPatch {
 	    onnxRuntimePath?: string;
 	    miniLMModelDir?: string;
+	    essentiaModelDir?: string;
 	    ffmpegPath?: string;
 	    ffprobePath?: string;
 	
@@ -137,6 +138,7 @@ export namespace deps {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.onnxRuntimePath = source["onnxRuntimePath"];
 	        this.miniLMModelDir = source["miniLMModelDir"];
+	        this.essentiaModelDir = source["essentiaModelDir"];
 	        this.ffmpegPath = source["ffmpegPath"];
 	        this.ffprobePath = source["ffprobePath"];
 	    }

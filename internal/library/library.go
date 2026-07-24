@@ -241,11 +241,11 @@ func (s *Service) UpdateEngines(engine *onnx.Engine, essentia *onnx.EssentiaEngi
 		pending = append(pending, job)
 	}
 	s.mu.Unlock()
-	s.enqueueAnalysisJobs(pending)
 	if len(jobs) > 0 {
 		s.beginIndexing(len(jobs), "repairing")
 		libLog.I("queued embedding repairs after engine update count=%d deferred=%d", len(jobs), len(jobs)-len(pending))
 	}
+	s.enqueueAnalysisJobs(pending)
 }
 
 func (s *Service) SetAnalyzedHook(h func(Track)) {
@@ -417,11 +417,11 @@ func (s *Service) Load() error {
 	s.sortLocked()
 	jobs := s.collectEmbeddingRepairJobsLocked()
 	s.mu.Unlock()
-	s.enqueueAnalysisJobs(jobs)
 	if len(jobs) > 0 {
 		s.beginIndexing(len(jobs), "repairing")
 		libLog.I("queued embedding repairs count=%d", len(jobs))
 	}
+	s.enqueueAnalysisJobs(jobs)
 	s.emitIdleIndexing()
 	return nil
 }
@@ -931,7 +931,7 @@ func (s *Service) analyzeTrack(parent context.Context, job analysisJob) (Track, 
 				genreMargin = ml.GenreMargin
 				track.GenreDetail = ml.GenreDetail
 				track.GenreTags = append([]onnx.GenreTag{}, ml.GenreTags...)
-				track.GenrePrimary = chooseGenre(track.Genre, ml.GenrePrimary, ml.GenreScore, ml.GenreMargin)
+				track.GenrePrimary = chooseGenre(track.Genre, ml.GenrePrimary)
 				if strings.TrimSpace(ml.GenreLabel) != "" {
 					track.GenreLabel = ml.GenreLabel
 				} else {
@@ -1117,13 +1117,15 @@ func buildTags(t Track) string {
 	return strings.ToLower(strings.Join([]string{t.Title, t.Artist, t.Album, t.Genre, t.FileName}, " "))
 }
 
-func chooseGenre(metaGenre, mlGenre string, mlScore, mlMargin float64) string {
-	metaGenre = sanitizeMetadataGenre(metaGenre)
+func chooseGenre(metaGenre, mlGenre string) string {
+	// Essentia already applies model-output quality, score and margin gates.
+	// Repeating a stricter threshold here produced contradictory state where
+	// GenreLabel contained an accepted ML genre while GenrePrimary was Unknown.
 	mlGenre = strings.TrimSpace(strings.ReplaceAll(mlGenre, "---", " / "))
-	if mlGenre != "" && mlScore >= 0.15 && mlMargin >= 0.05 {
+	if mlGenre != "" {
 		return mlGenre
 	}
-	if metaGenre != "" {
+	if metaGenre = sanitizeMetadataGenre(metaGenre); metaGenre != "" {
 		return metaGenre
 	}
 	return "Unknown"

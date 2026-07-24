@@ -34,13 +34,34 @@ deps-minilm:
 deps-onnxruntime:
     go run ./cmd/ray_deps onnxruntime
 
+# Скачать полный runtime-набор Essentia в управляемую папку приложения.
+deps-essentia:
+    go run ./cmd/ray_deps essentia
+
 # Подготовить все runtime-зависимости и сразу выполнить реальный smoke-test.
 deps:
     go run ./cmd/ray_deps ffmpeg --install
     go run ./cmd/ray_deps onnxruntime
     go run ./cmd/ray_deps minilm
+    go run ./cmd/ray_deps essentia
     go run ./cmd/ray_deps check
     @echo "Runtime dependencies are ready and verified"
+
+
+# Форматировать Go и frontend вручную.
+format:
+    gofmt -w $(git ls-files '*.go')
+    npm --prefix frontend run format
+
+# Немутабельная проверка форматирования для CI и pre-commit.
+format-check:
+    ./scripts/check-go-format.sh
+    npm --prefix frontend run check
+
+# Подключить безопасный локальный hook без npm install и сетевых действий.
+hooks:
+    git config core.hooksPath .githooks
+    @echo "Git hooks enabled from .githooks"
 
 # Ray Player - Тесты
 test:
@@ -67,7 +88,7 @@ vet:
     go vet ./...
 
 # Полный локальный quality gate перед коммитом.
-test-all: vet test test-race test-cover test-frontend frontend-build
+test-all: format-check vet test test-cover test-frontend frontend-build
     @echo "All quality gates passed"
 
 # Ray Player - Очистка кэша тестов и запуск

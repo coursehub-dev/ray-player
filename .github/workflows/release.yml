@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+      - name: Prepare portable runtime assets
+        run: |
+          go run ./cmd/ray_deps ffmpeg --install
+          go run ./cmd/ray_deps onnxruntime
+          go run ./cmd/ray_deps minilm
+      - name: Build macOS arm64
+        run: |
+          wails build -clean -platform darwin/arm64
+          go run ./cmd/ray_deps stage --build-dir build/bin
+      - name: Package macOS app
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent build/bin/ray-player1.app dist/ray-player1-darwin-arm64.zip
+          shasum -a 256 dist/ray-player1-darwin-arm64.zip > dist/ray-player1-darwin-arm64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ray-player1-darwin-arm64
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+      - name: Prepare portable runtime assets
+        run: |
+          go run ./cmd/ray_deps ffmpeg --install
+          go run ./cmd/ray_deps onnxruntime
+          go run ./cmd/ray_deps minilm
+      - name: Build Windows amd64
+        run: |
+          wails build -clean -platform windows/amd64 -webview2 embed
+          go run ./cmd/ray_deps stage --build-dir build/bin
+      - name: Package Windows app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path build/bin/ray-player1.exe,build/bin/assets -DestinationPath dist/ray-player1-windows-amd64.zip -Force
+          $hash = (Get-FileHash dist/ray-player1-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  ray-player1-windows-amd64.zip" | Set-Content -NoNewline dist/ray-player1-windows-amd64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ray-player1-windows-amd64
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --generate-notes --verify-tag
+          fi

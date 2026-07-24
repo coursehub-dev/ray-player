@@ -52,9 +52,57 @@
     *   `sudo apt install golang-go`
 
 Проверь установку:
+
 ```bash
 go version
 ```
+
+---
+
+## Разработка и вклад
+
+Инструкция для разработчиков, правила ML-изменений и pipeline Pull Request находятся в [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Быстрый старт:
+
+```bash
+npm ci --prefix frontend
+just hooks
+just deps
+just dev
+```
+
+Перед PR:
+
+```bash
+just format
+just test-all
+```
+
+## Сборка portable-версии
+
+```bash
+just build-portable
+```
+
+Команда подготавливает runtime-зависимости, собирает Wails-приложение и добавляет ONNX Runtime, FFmpeg, MiniLM и Essentia assets в `build/bin` или внутрь macOS `.app`.
+
+Поддерживаемые release targets:
+
+- macOS arm64;
+- Windows amd64.
+
+macOS amd64 не включён в официальный release matrix, потому что используемая версия ONNX Runtime не публикует совместимый официальный x86_64 runtime. Системную или самостоятельно собранную библиотеку можно указать вручную в настройках.
+
+## GitHub Releases
+
+Тег `vX.Y.Z` запускает `.github/workflows/release.yml`. Workflow выполняет нативную сборку на macOS arm64 и Windows amd64, формирует ZIP и SHA-256, затем создаёт или обновляет GitHub Release.
+
+macOS-архив по умолчанию не notarized. Для публичной массовой дистрибуции добавьте отдельный signing/notarization job с Apple Developer ID secrets; не храните сертификаты в репозитории.
+
+## Лицензия
+
+Код проекта распространяется по GNU General Public License v3. Полный текст — [LICENSE.md](LICENSE.md). Лицензии сторонних моделей и библиотек перечислены отдельно в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### 2. Призови Wails
 Wails — наш главный дирижер. Установи его одной командой:

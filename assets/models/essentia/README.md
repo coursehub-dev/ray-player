@@ -12,6 +12,33 @@
 uv run --with tf2onnx --with tensorflow python -m tf2onnx.convert --graphdef ray-player1/assets/models/essentia/audioset-vggish-3.pb --output ray-player1/assets/models/essentia/audioset-vggish-3.onnx --inputs model/Placeholder:0 --outputs model/vggish/embeddings:0
 ```
 
+## Runtime bundle Ray Player
+
+Приложению нужен полный набор файлов, возвращаемый `onnx.RequiredEssentiaFiles()`: базовые Discogs EffNet-модели, dynamic ONNX, genre/tempo и все используемые classification heads. `.pb`-файлы являются исходниками/артефактами конвертации и в runtime-пакет не входят.
+
+Doctor при отсутствии валидного каталога скачивает `.onnx` и `.json` в управляемую папку приложения:
+
+```text
+<user-config>/ray-player1/assets/runtime/models/essentia
+```
+
+Источник по умолчанию:
+
+```text
+https://raw.githubusercontent.com/coursehub-dev/ray-player/main/assets/models/essentia
+```
+
+Для зеркала или закреплённого immutable ref задайте `RAY_PLAYER_ESSENTIA_BASE_URL`. Сервер должен отдавать файлы непосредственно по `<base>/<filename>`.
+
+Проверка:
+
+```bash
+just deps-essentia
+just deps-check
+```
+
+В production желательно закрепить URL на release tag или commit SHA. После публикации новой версии моделей сначала прогоните `audio_probe_batch`, затем обновите URL/версию одним отдельным PR. Не исправляйте классы по названию трека, имени файла или исполнителю: это скрывает дефекты аудиопайплайна и делает результаты невоспроизводимыми.
+
 ```bash
 uv run --with tf2onnx --with tensorflow python -m tf2onnx.convert --graphdef ray-player1/assets/models/essentia/danceability-audioset-vggish-1.pb --output ray-player1/assets/models/essentia/danceability-audioset-vggish-1.onnx --inputs model/Placeholder:0 --outputs model/Softmax:0
 ```

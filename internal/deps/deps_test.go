@@ -1,28 +1,35 @@
 package deps
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	rayonnx "ray-player1/internal/onnx"
 )
 
 func TestApplyPatchOnlyOverridesReturnedValues(t *testing.T) {
 	base := Settings{
-		ONNXRuntimePath: "/old/ort",
-		MiniLMModelDir:  "/old/minilm",
-		FFmpegPath:      "/old/ffmpeg",
-		FFprobePath:     "/old/ffprobe",
+		ONNXRuntimePath:  "/old/ort",
+		MiniLMModelDir:   "/old/minilm",
+		EssentiaModelDir: "/old/essentia",
+		FFmpegPath:       "/old/ffmpeg",
+		FFprobePath:      "/old/ffprobe",
 	}
 	got := applyPatch(base, SettingsPatch{
-		MiniLMModelDir: "/new/minilm",
-		FFmpegPath:     "/new/ffmpeg",
+		MiniLMModelDir:   "/new/minilm",
+		EssentiaModelDir: "/new/essentia",
+		FFmpegPath:       "/new/ffmpeg",
 	})
 	if got.ONNXRuntimePath != base.ONNXRuntimePath || got.FFprobePath != base.FFprobePath {
 		t.Fatalf("unrelated settings changed: %#v", got)
 	}
-	if got.MiniLMModelDir != "/new/minilm" || got.FFmpegPath != "/new/ffmpeg" {
+	if got.MiniLMModelDir != "/new/minilm" || got.EssentiaModelDir != "/new/essentia" || got.FFmpegPath != "/new/ffmpeg" {
 		t.Fatalf("patch was not applied: %#v", got)
 	}
 }
@@ -101,5 +108,54 @@ func TestCurrentPlatformManifestIsKnownWhenSupportedByApplication(t *testing.T) 
 	}
 	if _, ok := ffmpegAssetFor(runtime.GOOS, runtime.GOARCH); !ok {
 		t.Fatalf("ONNX Runtime is supported but ffmpeg manifest is missing for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+func TestEnsureEssentiaDownloadsCompleteManagedBundle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(r.URL.Path)
+		if filepath.Ext(name) == ".json" {
+			_, _ = w.Write([]byte(`{"classes":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte("onnx-fixture"))
+	}))
+	defer server.Close()
+
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
+	t.Setenv(essentiaModelBaseURLEnv, server.URL)
+
+	dir, err := EnsureEssentia(context.Background(), "")
+	if err != nil {
+		t.Fatalf("EnsureEssentia: %v", err)
+	}
+	for _, name := range rayonnx.RequiredEssentiaFiles() {
+		if !regularFile(filepath.Join(dir, name)) {
+			t.Fatalf("downloaded bundle is missing %s", name)
+		}
+	}
+}
+func TestEnsureEssentiaUsesConfiguredBundleWithoutDownloading(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range rayonnx.RequiredEssentiaFiles() {
+		content := []byte("onnx-fixture")
+		if filepath.Ext(name) == ".json" {
+			content = []byte(`{"classes":[]}`)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(essentiaModelBaseURLEnv, "http://127.0.0.1:1")
+
+	got, err := EnsureEssentia(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("EnsureEssentia: %v", err)
+	}
+	want, _ := filepath.Abs(dir)
+	if got != want {
+		t.Fatalf("dir=%q want=%q", got, want)
 	}
 }

@@ -350,9 +350,14 @@ func (a *App) startup(ctx context.Context) {
 		if a.ctx != nil {
 			wruntime.EventsEmit(a.ctx, "indexing:update", st)
 		}
+		if !st.IsIndexing && st.Phase == "done" {
+			a.ScheduleRecluster()
+		}
 	})
 	_ = a.library.Load()
-	a.RunReclusterSingleflight()
+	if !shouldDeferRecluster(false, a.library.IndexingState()) {
+		a.RunReclusterSingleflight()
+	}
 	a.audio.SetOnEnded(a.handlePlaybackEnded)
 	a.audio.SetOnStarted(a.handlePlaybackStarted)
 
@@ -2973,7 +2978,11 @@ func (a *App) ScheduleRecluster() {
 	if stopping {
 		return
 	}
-	if a.isReindexRunning() {
+	indexing := library.IndexingState{}
+	if a.library != nil {
+		indexing = a.library.IndexingState()
+	}
+	if shouldDeferRecluster(a.isReindexRunning(), indexing) {
 		return
 	}
 
@@ -2990,6 +2999,10 @@ func (a *App) ScheduleRecluster() {
 			a.RunReclusterSingleflight()
 		})
 	})
+}
+
+func shouldDeferRecluster(reindexRunning bool, indexing library.IndexingState) bool {
+	return reindexRunning || indexing.IsIndexing
 }
 
 func (a *App) isReindexRunning() bool {

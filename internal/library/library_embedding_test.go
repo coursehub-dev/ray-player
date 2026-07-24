@@ -64,15 +64,15 @@ func TestSanitizeMetadataGenreRejectsDownloadSiteTags(t *testing.T) {
 	}
 }
 
-func TestChooseGenreRequiresStrongMLConfidence(t *testing.T) {
-	if got := chooseGenre("Hip-Hop", "Rock", 0.11, 0.10); got != "Hip-Hop" {
-		t.Fatalf("weak ML should fall back to metadata, got %q", got)
+func TestChooseGenreTrustsGenreAcceptedByEssentia(t *testing.T) {
+	if got := chooseGenre("Hip-Hop", "Rock"); got != "Rock" {
+		t.Fatalf("accepted ML genre should win, got %q", got)
 	}
-	if got := chooseGenre("Hip-Hop", "Rock", 0.24, 0.08); got != "Rock" {
-		t.Fatalf("strong ML should win, got %q", got)
+	if got := chooseGenre("Hip-Hop", ""); got != "Hip-Hop" {
+		t.Fatalf("missing ML genre should fall back to metadata, got %q", got)
 	}
-	if got := chooseGenre("www.lightaudio.ru", "Rock", 0.11, 0.10); got != "Unknown" {
-		t.Fatalf("invalid metadata plus weak ML should be Unknown, got %q", got)
+	if got := chooseGenre("www.lightaudio.ru", ""); got != "Unknown" {
+		t.Fatalf("invalid metadata without accepted ML genre should be Unknown, got %q", got)
 	}
 }
 

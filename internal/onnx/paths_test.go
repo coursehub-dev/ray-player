@@ -181,3 +181,64 @@ func TestResolveEssentiaModelDirRejectsPartialBundle(t *testing.T) {
 		t.Fatal("expected partial Essentia bundle to be rejected")
 	}
 }
+
+func TestRequiredEssentiaFilesIncludesEveryLoadedHead(t *testing.T) {
+	files := RequiredEssentiaFiles()
+	seen := make(map[string]bool, len(files))
+	for _, name := range files {
+		seen[name] = true
+	}
+	for _, name := range append([]string{
+		"discogs-effnet-bs64-1",
+		"discogs-effnet-bsdynamic-1",
+		"genre_discogs400-discogs-effnet-1",
+		"deeptemp-k4-3",
+	}, essentiaHeadNames...) {
+		for _, ext := range []string{".onnx", ".json"} {
+			if !seen[name+ext] {
+				t.Fatalf("runtime bundle is missing %s", name+ext)
+			}
+		}
+	}
+}
+
+func TestResolveEssentiaModelDirAcceptsCompleteRuntimeBundle(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range RequiredEssentiaFiles() {
+		content := []byte("onnx-fixture")
+		if filepath.Ext(name) == ".json" {
+			content = []byte(`{"classes":[]}`)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ResolveEssentiaModelDir(dir)
+	if err != nil {
+		t.Fatalf("ResolveEssentiaModelDir: %v", err)
+	}
+	want, _ := filepath.Abs(dir)
+	if got != want {
+		t.Fatalf("dir=%q want=%q", got, want)
+	}
+}
+
+func TestResolveEssentiaModelDirRejectsGitLFSPointer(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range RequiredEssentiaFiles() {
+		content := []byte("onnx-fixture")
+		if filepath.Ext(name) == ".json" {
+			content = []byte(`{"classes":[]}`)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pointer := "version https://git-lfs.github.com/spec/v1\noid sha256:fixture\nsize 123\n"
+	if err := os.WriteFile(filepath.Join(dir, "discogs-effnet-bsdynamic-1.onnx"), []byte(pointer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveEssentiaModelDir(dir); err == nil {
+		t.Fatal("expected Git LFS pointer to be rejected")
+	}
+}

@@ -24,11 +24,12 @@ test("doctor patch only replaces values returned by backend", () => {
 	const next = mergeDoctorPatch(settings, {
 		ffmpegPath: "/managed/ffmpeg",
 		ffprobePath: "/managed/ffprobe",
+		essentiaModelDir: "/managed/essentia",
 	});
 	assert.equal(next.ffmpegPath, "/managed/ffmpeg");
 	assert.equal(next.ffprobePath, "/managed/ffprobe");
 	assert.equal(next.onnxRuntimePath, "old-runtime");
-	assert.equal(next.essentiaModelDir, "essentia");
+	assert.equal(next.essentiaModelDir, "/managed/essentia");
 });
 
 test("doctor status labels map to the intended actions", () => {

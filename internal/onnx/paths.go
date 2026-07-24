@@ -1,8 +1,11 @@
 package onnx
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,6 +24,37 @@ const (
 )
 
 const miniLMRelativeDir = "paraphrase-multilingual-MiniLM-L12-v2_onnx"
+
+var essentiaRuntimeModelNames = []string{
+	"discogs-effnet-bs64-1",
+	"discogs-effnet-bsdynamic-1",
+	"genre_discogs400-discogs-effnet-1",
+	"deeptemp-k4-3",
+	"danceability-discogs-effnet-1",
+	"mood_happy-discogs-effnet-1",
+	"mood_sad-discogs-effnet-1",
+	"mood_relaxed-discogs-effnet-1",
+	"mood_party-discogs-effnet-1",
+	"mood_aggressive-discogs-effnet-1",
+	"mood_acoustic-discogs-effnet-1",
+	"mood_electronic-discogs-effnet-1",
+	"voice_instrumental-discogs-effnet-1",
+	"mtg_jamendo_moodtheme-discogs-effnet-1",
+	"timbre-discogs-effnet-1",
+	"tonal_atonal-discogs-effnet-1",
+	"approachability_regression-discogs-effnet-1",
+	"engagement_regression-discogs-effnet-1",
+}
+
+// RequiredEssentiaFiles returns the complete runtime bundle. TensorFlow .pb
+// sources and unused experimental models are intentionally excluded.
+func RequiredEssentiaFiles() []string {
+	files := make([]string, 0, len(essentiaRuntimeModelNames)*2)
+	for _, name := range essentiaRuntimeModelNames {
+		files = append(files, name+".onnx", name+".json")
+	}
+	return files
+}
 
 func ResolveRuntimeLibraryPath(configured string) (string, error) {
 	configured = strings.TrimSpace(configured)
@@ -133,8 +167,11 @@ func resolveAssetDir(
 	}
 	cwd, _ := os.Getwd()
 	managed := ""
-	if relative == filepath.Join("assets", "runtime", "models", miniLMRelativeDir) {
+	switch relative {
+	case filepath.Join("assets", "runtime", "models", miniLMRelativeDir):
 		managed, _ = appdirs.ManagedMiniLMDir()
+	case filepath.Join("assets", "models", "essentia"):
+		managed, _ = appdirs.ManagedEssentiaDir()
 	}
 	for _, candidate := range assetDirCandidates(executableDir, cwd, managed, relative) {
 		if err := validate(candidate); err != nil {
@@ -184,18 +221,41 @@ func assetDirCandidates(executableDir, cwd, managed, relative string) []string {
 }
 
 func validateEssentiaModelDir(dir string) error {
-	required := []string{
-		"discogs-effnet-bs64-1.onnx",
-		"discogs-effnet-bs64-1.json",
-		"genre_discogs400-discogs-effnet-1.onnx",
-		"genre_discogs400-discogs-effnet-1.json",
-		"deeptemp-k4-3.onnx",
-		"deeptemp-k4-3.json",
-	}
-	for _, name := range required {
+	for _, name := range RequiredEssentiaFiles() {
 		path := filepath.Join(dir, name)
 		if !isRegularFile(path) {
 			return fmt.Errorf("required model file missing: %s", path)
+		}
+		if filepath.Ext(name) == ".json" {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read model metadata %s: %w", path, err)
+			}
+			if !json.Valid(raw) {
+				return fmt.Errorf("invalid model metadata JSON: %s", path)
+			}
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("open model file %s: %w", path, err)
+		}
+		buf := make([]byte, 256)
+		n, readErr := f.Read(buf)
+		closeErr := f.Close()
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return fmt.Errorf("read model file %s: %w", path, readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close model file %s: %w", path, closeErr)
+		}
+		prefix := bytes.TrimSpace(buf[:n])
+		if bytes.HasPrefix(prefix, []byte("version https://git-lfs.github.com/spec/v1")) {
+			return fmt.Errorf("Git LFS pointer downloaded instead of ONNX model: %s", path)
+		}
+		lower := bytes.ToLower(prefix)
+		if bytes.HasPrefix(lower, []byte("<!doctype html")) || bytes.HasPrefix(lower, []byte("<html")) {
+			return fmt.Errorf("HTML downloaded instead of ONNX model: %s", path)
 		}
 	}
 	return nil

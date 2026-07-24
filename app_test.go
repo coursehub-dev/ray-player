@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ray-player1/internal/appstate"
+	"ray-player1/internal/library"
 	"ray-player1/internal/rays"
 )
 
@@ -205,5 +206,17 @@ func TestBackgroundLifecycleRejectsNewWorkAfterStop(t *testing.T) {
 
 	if app.launchBackground(func(context.Context) {}) {
 		t.Fatal("background work must be rejected after shutdown begins")
+	}
+}
+
+func TestShouldDeferReclusterWhileLibraryIsIndexing(t *testing.T) {
+	if !shouldDeferRecluster(false, library.IndexingState{IsIndexing: true}) {
+		t.Fatal("background embedding repair must defer reclustering")
+	}
+	if !shouldDeferRecluster(true, library.IndexingState{}) {
+		t.Fatal("manual reindex must defer reclustering")
+	}
+	if shouldDeferRecluster(false, library.IndexingState{IsIndexing: false, Phase: "done"}) {
+		t.Fatal("completed indexing must allow one final recluster")
 	}
 }

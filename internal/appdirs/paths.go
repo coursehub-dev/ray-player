@@ -50,6 +50,14 @@ func ManagedONNXRuntimeDir() (string, error) {
 	return filepath.Join(root, "runtime", "onnxruntime", runtime.GOOS+"-"+runtime.GOARCH), nil
 }
 
+func ManagedEssentiaDir() (string, error) {
+	root, err := AssetsRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "runtime", "models", "essentia"), nil
+}
+
 func ManagedMiniLMDir() (string, error) {
 	root, err := AssetsRoot()
 	if err != nil {

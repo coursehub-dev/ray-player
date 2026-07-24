@@ -23,10 +23,12 @@ import (
 )
 
 const (
-	ONNXRuntimeVersion = "1.26.0"
-	MiniLMRepository   = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-	FFmpegStaticTag    = "b6.1.1"
-	maxDownloadBytes   = int64(2 << 30)
+	ONNXRuntimeVersion      = "1.26.0"
+	MiniLMRepository        = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+	FFmpegStaticTag         = "b6.1.1"
+	EssentiaModelBaseURL    = "https://raw.githubusercontent.com/coursehub-dev/ray-player/main/assets/models/essentia"
+	essentiaModelBaseURLEnv = "RAY_PLAYER_ESSENTIA_BASE_URL"
+	maxDownloadBytes        = int64(2 << 30)
 )
 
 type Status string
@@ -55,10 +57,11 @@ type Check struct {
 }
 
 type SettingsPatch struct {
-	ONNXRuntimePath string `json:"onnxRuntimePath,omitempty"`
-	MiniLMModelDir  string `json:"miniLMModelDir,omitempty"`
-	FFmpegPath      string `json:"ffmpegPath,omitempty"`
-	FFprobePath     string `json:"ffprobePath,omitempty"`
+	ONNXRuntimePath  string `json:"onnxRuntimePath,omitempty"`
+	MiniLMModelDir   string `json:"miniLMModelDir,omitempty"`
+	EssentiaModelDir string `json:"essentiaModelDir,omitempty"`
+	FFmpegPath       string `json:"ffmpegPath,omitempty"`
+	FFprobePath      string `json:"ffprobePath,omitempty"`
 }
 
 type RepairResult struct {
@@ -111,6 +114,8 @@ func RepairComponent(ctx context.Context, id string, cfg Settings) RepairResult 
 		patch.ONNXRuntimePath, err = EnsureONNXRuntime(ctx)
 	case "minilm":
 		patch.MiniLMModelDir, err = EnsureMiniLM(ctx, cfg.MiniLMModelDir)
+	case "essentia":
+		patch.EssentiaModelDir, err = ensureEssentia(ctx, cfg.EssentiaModelDir, true)
 	default:
 		return RepairResult{Check: Check{ID: id, Title: id, Status: StatusBlocked, Message: "Автоисправление для этого пункта не предусмотрено"}}
 	}
@@ -145,6 +150,9 @@ func applyPatch(cfg Settings, patch SettingsPatch) Settings {
 	}
 	if patch.MiniLMModelDir != "" {
 		cfg.MiniLMModelDir = patch.MiniLMModelDir
+	}
+	if patch.EssentiaModelDir != "" {
+		cfg.EssentiaModelDir = patch.EssentiaModelDir
 	}
 	if patch.FFmpegPath != "" {
 		cfg.FFmpegPath = patch.FFmpegPath
@@ -236,7 +244,7 @@ func checkMiniLM(ctx context.Context, cfg Settings) Check {
 func checkEssentia(cfg Settings) Check {
 	dir, err := rayonnx.ResolveEssentiaModelDir(strings.TrimSpace(cfg.EssentiaModelDir))
 	if err != nil {
-		return Check{ID: "essentia", Title: componentTitle("essentia"), Status: StatusBlocked, Message: err.Error()}
+		return Check{ID: "essentia", Title: componentTitle("essentia"), Status: StatusRepairable, Repairable: true, Message: err.Error()}
 	}
 	runtimePath, err := rayonnx.ResolveRuntimeLibraryPath(strings.TrimSpace(cfg.ONNXRuntimePath))
 	if err != nil {
@@ -251,7 +259,7 @@ func checkEssentia(cfg Settings) Check {
 		if msg == "" {
 			msg = "Essentia models не прошли smoke-test"
 		}
-		return Check{ID: "essentia", Title: componentTitle("essentia"), Status: StatusBlocked, Message: msg, Path: dir}
+		return Check{ID: "essentia", Title: componentTitle("essentia"), Status: StatusRepairable, Repairable: true, Message: msg, Path: dir}
 	}
 	return Check{ID: "essentia", Title: componentTitle("essentia"), Status: StatusReady, Message: probe.Message, Path: dir}
 }
@@ -483,6 +491,63 @@ func EnsureMiniLM(ctx context.Context, configured string) (string, error) {
 		return "", fmt.Errorf("validate MiniLM bundle: %w", err)
 	}
 	return absolute, nil
+}
+
+// EnsureEssentia downloads the complete runtime model set into the managed
+// application assets directory when no valid configured bundle is available.
+func EnsureEssentia(ctx context.Context, configured string) (string, error) {
+	return ensureEssentia(ctx, configured, false)
+}
+
+func ensureEssentia(ctx context.Context, configured string, force bool) (string, error) {
+	if !force {
+		if dir, err := rayonnx.ResolveEssentiaModelDir(configured); err == nil {
+			return dir, nil
+		}
+	}
+	dir, err := appdirs.ManagedEssentiaDir()
+	if err != nil {
+		return "", err
+	}
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(absolute, 0o755); err != nil {
+		return "", err
+	}
+	if !force {
+		if ready, resolveErr := rayonnx.ResolveEssentiaModelDir(absolute); resolveErr == nil {
+			return ready, nil
+		}
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv(essentiaModelBaseURLEnv)), "/")
+	if baseURL == "" {
+		baseURL = EssentiaModelBaseURL
+	}
+	for _, name := range rayonnx.RequiredEssentiaFiles() {
+		dst := filepath.Join(absolute, name)
+		if !force && regularFile(dst) {
+			if filepath.Ext(name) != ".json" || validateJSONFile(dst) == nil {
+				continue
+			}
+		}
+		_ = os.Remove(dst)
+		if err := downloadFile(ctx, baseURL+"/"+name, dst); err != nil {
+			return "", fmt.Errorf("download Essentia model %s: %w", name, err)
+		}
+		if filepath.Ext(name) == ".json" {
+			if err := validateJSONFile(dst); err != nil {
+				_ = os.Remove(dst)
+				return "", err
+			}
+		}
+	}
+	ready, err := rayonnx.ResolveEssentiaModelDir(absolute)
+	if err != nil {
+		return "", fmt.Errorf("validate Essentia bundle: %w", err)
+	}
+	return ready, nil
 }
 
 func ffmpegAssetFor(goos, goarch string) (ffmpegAsset, bool) {
