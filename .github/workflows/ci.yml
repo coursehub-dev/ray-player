@@ -56,7 +56,7 @@ jobs:
       - name: Create artifact payload
         run: printf 'ray-player-artifact-smoke\n' > artifact-smoke.txt
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-artifact-smoke
           path: artifact-smoke.txt
