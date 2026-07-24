@@ -1,6 +1,6 @@
 {
   "modelsDir": "./assets/models/essentia",
-  "onnxRuntimePath": "../bm25-search1/assets/lib/libonnxruntime/macos-arm64/libonnxruntime.dylib",
+  "onnxRuntimePath": "",
   "ffmpegPath": "ffmpeg",
   "melMode": "official",
   "includeRawVectors": false,

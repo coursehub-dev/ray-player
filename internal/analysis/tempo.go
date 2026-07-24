@@ -11,18 +11,22 @@ import (
 const (
 	TempoSampleRate  = 11025
 	TempoFFTSize     = 1024
-	TempoHopSize     = 256
+	TempoHopSize     = 512
 	TempoMelBands    = 40
 	TempoPatchFrames = 256
-	TempoPatchHop    = 64
+	TempoPatchHop    = 128
 )
 
 func ExtractTempoPatches(path string) ([][]float32, error) {
+	return ExtractTempoPatchesWithContext(context.Background(), path)
+}
+
+func ExtractTempoPatchesWithContext(ctx context.Context, path string) ([][]float32, error) {
 	cfg := DefaultFFmpegConfig()
 	cfg.SampleRate = TempoSampleRate
 	cfg.Duration = 90 * time.Second
 	cfg.Timeout = 90 * time.Second
-	raw, sr, _, err := DecodeMonoFloat32WithFFmpeg(context.Background(), path, cfg)
+	raw, sr, _, err := DecodeMonoFloat32WithFFmpeg(ctx, path, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +52,7 @@ func ExtractTempoPatches(path string) ([][]float32, error) {
 	if len(patches) == 0 {
 		return nil, errors.New("too few tempo patches")
 	}
+	standardizeTempoPatches(patches)
 	return patches, nil
 }
 
@@ -60,35 +65,105 @@ func extractTempoFrames(samples []float64) [][]float32 {
 		hopSize:    TempoHopSize,
 		melBands:   TempoMelBands,
 		hannWin:    buildHannWindow(TempoFFTSize),
-		melFilters: buildMelFilterbank(TempoMelBands, TempoFFTSize, TempoSampleRate),
+		melFilters: buildTempoCNNMelFilterbank(),
 	}
-	frames := processor.ProcessEnergy(samples)
-	if len(frames) == 0 {
-		return nil
-	}
-	normalizeTempoFrames(frames)
-	return frames
+	return processor.ProcessEnergy(samples)
 }
 
-func normalizeTempoFrames(frames [][]float32) {
-	if len(frames) == 0 {
-		return
+func buildTempoCNNMelFilterbank() [][]float64 {
+	const (
+		lowHz  = 20.0
+		highHz = 5000.0
+	)
+	half := TempoFFTSize/2 + 1
+	lowMel := hzToSlaneyMel(lowHz)
+	highMel := hzToSlaneyMel(highHz)
+	freqs := make([]float64, TempoMelBands+2)
+	for i := range freqs {
+		mel := lowMel + (highMel-lowMel)*float64(i)/float64(len(freqs)-1)
+		freqs[i] = slaneyMelToHz(mel)
 	}
-	for band := 0; band < len(frames[0]); band++ {
+
+	filters := make([][]float64, TempoMelBands)
+	freqScale := (float64(TempoSampleRate) / 2) / float64(half-1)
+	for band := 0; band < TempoMelBands; band++ {
+		left, center, right := freqs[band], freqs[band+1], freqs[band+2]
+		filters[band] = make([]float64, half)
+		unitTriArea := (center - left + right - center) / 2
+		if unitTriArea <= 0 {
+			continue
+		}
+		start := int(math.Ceil(left / freqScale))
+		end := int(math.Floor(right / freqScale))
+		if start < 0 {
+			start = 0
+		}
+		if end >= half {
+			end = half - 1
+		}
+		for bin := start; bin <= end; bin++ {
+			freq := float64(bin) * freqScale
+			weight := 0.0
+			if freq < center {
+				weight = (freq - left) / (center - left)
+			} else {
+				weight = (right - freq) / (right - center)
+			}
+			if weight > 0 {
+				filters[band][bin] = weight / unitTriArea
+			}
+		}
+	}
+	return filters
+}
+
+func hzToSlaneyMel(hz float64) float64 {
+	const (
+		freqStep  = 200.0 / 3.0
+		minLogHz  = 1000.0
+		minLogMel = minLogHz / freqStep
+		logStep   = 0.06875177742094912
+	)
+	if hz < minLogHz {
+		return hz / freqStep
+	}
+	return minLogMel + math.Log(hz/minLogHz)/logStep
+}
+
+func slaneyMelToHz(mel float64) float64 {
+	const (
+		freqStep  = 200.0 / 3.0
+		minLogHz  = 1000.0
+		minLogMel = minLogHz / freqStep
+		logStep   = 0.06875177742094912
+	)
+	if mel < minLogMel {
+		return mel * freqStep
+	}
+	return minLogHz * math.Exp(logStep*(mel-minLogMel))
+}
+
+func standardizeTempoPatches(patches [][]float32) {
+	for _, patch := range patches {
+		if len(patch) == 0 {
+			continue
+		}
 		mean := 0.0
-		for i := range frames {
-			mean += float64(frames[i][band])
+		for _, value := range patch {
+			mean += float64(value)
 		}
-		mean /= float64(len(frames))
+		mean /= float64(len(patch))
 		variance := 0.0
-		for i := range frames {
-			d := float64(frames[i][band]) - mean
-			variance += d * d
+		for _, value := range patch {
+			delta := float64(value) - mean
+			variance += delta * delta
 		}
-		std := math.Sqrt(variance/float64(len(frames)) + 1e-9)
-		for i := range frames {
-			v := (math.Log1p(float64(frames[i][band])) - mean) / std
-			frames[i][band] = float32(v)
+		std := math.Sqrt(variance / float64(len(patch)))
+		if std <= 1e-12 {
+			std = 1
+		}
+		for i, value := range patch {
+			patch[i] = float32((float64(value) - mean) / std)
 		}
 	}
 }

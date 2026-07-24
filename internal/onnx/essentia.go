@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"ray-player1/internal/analysis"
 	"ray-player1/internal/logx"
 
 	ort "ray-player1/internal/onnx/ortshim"
@@ -23,6 +22,12 @@ import (
 var essentiaLog = logx.New("essentia")
 
 const essentiaEmbeddingSize = 1280
+
+const (
+	genrePrimaryMinScore  = 0.15
+	genrePrimaryMinMargin = 0.05
+	genreDetailMinScore   = 0.20
+)
 
 var essentiaHeadNames = []string{
 	"danceability-discogs-effnet-1",
@@ -159,6 +164,7 @@ type essentiaModelMeta struct {
 
 type EssentiaEngine struct {
 	mu                  sync.Mutex
+	lifeMu              sync.RWMutex
 	rt                  *ort.Runtime
 	env                 *ort.Env
 	base                *ort.Session
@@ -532,12 +538,29 @@ func (e *EssentiaEngine) loadGenre(modelsDir string) {
 	}
 }
 
-func (e *EssentiaEngine) Ready() bool { return e != nil && e.base != nil && e.genreSession != nil }
+func (e *EssentiaEngine) Ready() bool {
+	if e == nil {
+		return false
+	}
+	e.lifeMu.RLock()
+	defer e.lifeMu.RUnlock()
+	return e.readyLocked()
+}
+
+func (e *EssentiaEngine) readyLocked() bool {
+	return e.base != nil && e.genreSession != nil
+}
 
 func (e *EssentiaEngine) BackendName() string {
 	if e == nil {
 		return "none"
 	}
+	e.lifeMu.RLock()
+	defer e.lifeMu.RUnlock()
+	return e.backendNameLocked()
+}
+
+func (e *EssentiaEngine) backendNameLocked() string {
 	if e.discogs != nil {
 		return "discogs-bsdynamic"
 	}
@@ -545,7 +568,12 @@ func (e *EssentiaEngine) BackendName() string {
 }
 
 func (e *EssentiaEngine) enabledHeadNames() []string {
-	if e == nil || len(e.headMap) == 0 {
+	if e == nil {
+		return nil
+	}
+	e.lifeMu.RLock()
+	defer e.lifeMu.RUnlock()
+	if len(e.headMap) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(e.headMap))
@@ -561,6 +589,13 @@ func (e *EssentiaEngine) Close() error {
 	if e == nil {
 		return nil
 	}
+	e.lifeMu.Lock()
+	defer e.lifeMu.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.readyLocked() && e.discogs == nil {
+		return nil
+	}
 	if e.discogs != nil {
 		_ = e.discogs.Close()
 		e.discogs = nil
@@ -568,27 +603,37 @@ func (e *EssentiaEngine) Close() error {
 	for _, head := range e.headMap {
 		if head != nil && head.session != nil {
 			head.session.Close()
+			head.session = nil
 		}
 	}
 	if e.genreSession != nil {
 		e.genreSession.Close()
+		e.genreSession = nil
 	}
 	if e.base != nil {
 		e.base.Close()
+		e.base = nil
 	}
 	if e.env != nil {
 		e.env.Close()
+		e.env = nil
 	}
 	if e.rt != nil {
 		_ = e.rt.Close()
+		e.rt = nil
 	}
 	return ReleaseEnvironment()
 }
 
 func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int) (EssentiaOutput, error) {
+	if e == nil {
+		return EssentiaOutput{}, errors.New("essentia not ready")
+	}
+	e.lifeMu.RLock()
+	defer e.lifeMu.RUnlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.Ready() {
+	if !e.readyLocked() {
 		return EssentiaOutput{}, errors.New("essentia not ready")
 	}
 
@@ -598,10 +643,10 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 	}
 	essentiaLog.I(
 		"analyze backend=%s baseModel=%q genreHead=%q ready=%t",
-		e.BackendName(),
+		e.backendNameLocked(),
 		e.baseModelPath,
 		e.genreModelPath,
-		e.Ready(),
+		e.readyLocked(),
 	)
 
 	inputMel, validPatches, shape, err := prepareBaseMelInput(e.baseExpectedDims, mel, patches)
@@ -715,8 +760,8 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 	result.GenreQuality = quality
 
 	if !result.GenreReliable ||
-		result.GenreScore < 0.08 ||
-		result.GenreMargin < 0.025 {
+		result.GenreScore < genrePrimaryMinScore ||
+		result.GenreMargin < genrePrimaryMinMargin {
 		essentiaLog.W(
 			"genre rejected primary=%q detail=%q score=%.4f margin=%.4f reliable=%t",
 			result.GenrePrimary,
@@ -781,10 +826,33 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 		case "tonal_atonal-discogs-effnet-1":
 			result.Tonality = headClassProbability(head, avg, "tonal")
 		case "approachability_regression-discogs-effnet-1":
-			result.Approachability = regressionHeadValue(avg)
+			diag := aggregateRegressionHead(probs, validPatches)
+			result.Approachability = diag.Value
+			logRegressionHead(name, diag)
 		case "engagement_regression-discogs-effnet-1":
-			result.Engagement = regressionHeadValue(avg)
+			diag := aggregateRegressionHead(probs, validPatches)
+			result.Engagement = diag.Value
+			logRegressionHead(name, diag)
 		case "mtg_jamendo_moodtheme-discogs-effnet-1":
+			jamHappy := classProb(avg, head.classes, "happy")
+			jamSad := classProb(avg, head.classes, "sad")
+			jamMelancholic := classProb(avg, head.classes, "melancholic")
+			jamCalm := maxf(
+				classProb(avg, head.classes, "calm"),
+				classProb(avg, head.classes, "relaxing"),
+			)
+			jamHeavy := classProb(avg, head.classes, "heavy")
+			jamPowerful := classProb(avg, head.classes, "powerful")
+			jamDark := classProb(avg, head.classes, "dark")
+			jamParty := classProb(avg, head.classes, "party")
+			result.MoodHappy = maxf(result.MoodHappy, jamHappy)
+			result.MoodSad = maxf(result.MoodSad, maxf(jamSad, jamMelancholic))
+			result.MoodRelaxed = clamp01(0.65*result.MoodRelaxed + 0.35*jamCalm)
+			result.MoodParty = maxf(result.MoodParty, jamParty)
+			result.MoodAggressive = maxf(
+				result.MoodAggressive,
+				clamp01(0.65*jamHeavy+0.20*jamPowerful+0.15*jamDark),
+			)
 			result.Melodicness = clamp01(
 				0.65*classProb(avg, head.classes, "melodic") +
 					0.20*classProb(avg, head.classes, "emotional") +
@@ -796,8 +864,8 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 					0.20*classProb(avg, head.classes, "relaxing"),
 			)
 			result.Heaviness = clamp01(
-				0.50*classProb(avg, head.classes, "heavy") +
-					0.30*classProb(avg, head.classes, "powerful") +
+				0.50*jamHeavy +
+					0.30*jamPowerful +
 					0.20*classProb(avg, head.classes, "dramatic"),
 			)
 			result.Dreaminess = clamp01(
@@ -807,15 +875,17 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 			)
 			result.Emotionality = clamp01(
 				0.45*classProb(avg, head.classes, "emotional") +
-					0.25*classProb(avg, head.classes, "melancholic") +
+					0.25*jamMelancholic +
 					0.15*classProb(avg, head.classes, "romantic") +
 					0.15*classProb(avg, head.classes, "dramatic"),
 			)
 		}
 	}
 
-	result.Valence = clamp01((result.MoodHappy + (1 - result.MoodSad)) * 0.5)
-	result.Energy = clamp01(maxf(result.MoodParty, result.MoodAggressive*0.85))
+	positiveMood := result.MoodHappy
+	negativeMood := result.MoodSad
+	result.Valence = clamp01(0.5 + 0.5*(positiveMood-negativeMood))
+	result.Energy = clamp01(maxf(result.MoodParty*0.85, result.MoodAggressive*0.90))
 	result.Melodicness = clamp01(maxf(result.Melodicness, 0.15*result.Tonality))
 	result.Softness = clamp01(maxf(result.Softness, 0.20*result.MoodRelaxed))
 	result.Heaviness = clamp01(maxf(result.Heaviness, 0.30*result.MoodAggressive))
@@ -830,20 +900,23 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		discogsMelBandsVal    = 96
 	)
 
-	frameCount := len(mel) / discogsMelBandsVal
-	if frameCount < discogsPatchFramesVal {
-		frameCount = discogsPatchFramesVal
+	if patches <= 0 {
+		return EssentiaOutput{}, errors.New("no Discogs mel patches provided")
 	}
-	discogsMel, discogsFrames, err := makeDiscogsMelSpectrogramFromFlat(mel, frameCount, discogsMelBandsVal)
-	if err != nil {
-		return EssentiaOutput{}, fmt.Errorf("discogs mel prepare: %w", err)
+	patchSize := discogsPatchFramesVal * discogsMelBandsVal
+	expected := patches * patchSize
+	if len(mel) != expected {
+		return EssentiaOutput{}, fmt.Errorf(
+			"invalid Discogs mel contract: len=%d patches=%d expected=%d",
+			len(mel),
+			patches,
+			expected,
+		)
 	}
-	patchesFlat, patchCount := analysis.MakeDiscogsPatches(discogsMel, discogsFrames)
-	if patchCount == 0 {
-		return EssentiaOutput{}, errors.New("no Discogs mel patches produced")
-	}
+	patchesFlat := mel
+	patchCount := patches
 
-	essentiaLog.I("discogs patches=%d len=%d", patchCount, len(patchesFlat))
+	essentiaLog.I("discogs patches=%d len=%d contract=prepatched", patchCount, len(patchesFlat))
 
 	discogsResult, err := e.runDiscogs(patchesFlat, patchCount)
 	if err != nil {
@@ -878,8 +951,8 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		finalizeGenreResult(&result)
 
 		quality, qualityErr := inspectGenreOutput(
-			discogsResult.MeanPredictions,
-			1,
+			flattenPatchPredictions(discogsResult.PatchPredictions),
+			patchCount,
 			len(e.genreClasses),
 		)
 		if qualityErr != nil {
@@ -907,8 +980,8 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		}
 
 		if !result.GenreReliable ||
-			result.GenreScore < 0.08 ||
-			result.GenreMargin < 0.025 {
+			result.GenreScore < genrePrimaryMinScore ||
+			result.GenreMargin < genrePrimaryMinMargin {
 			essentiaLog.W(
 				"discogs genre rejected primary=%q detail=%q score=%.4f margin=%.4f reliable=%t",
 				result.GenrePrimary,
@@ -925,6 +998,10 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 			result.GenreLabel = ""
 		}
 	}
+
+	jamendoPositive := 0.0
+	jamendoNegative := 0.0
+	jamendoEnergy := 0.0
 
 	headsStart := time.Now()
 	for _, name := range essentiaHeadNames {
@@ -968,10 +1045,44 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		case "tonal_atonal-discogs-effnet-1":
 			result.Tonality = headClassProbability(head, avg, "tonal")
 		case "approachability_regression-discogs-effnet-1":
-			result.Approachability = regressionHeadValue(avg)
+			diag := aggregateRegressionHead(probs, patchCount)
+			result.Approachability = diag.Value
+			logRegressionHead(name, diag)
 		case "engagement_regression-discogs-effnet-1":
-			result.Engagement = regressionHeadValue(avg)
+			diag := aggregateRegressionHead(probs, patchCount)
+			result.Engagement = diag.Value
+			logRegressionHead(name, diag)
 		case "mtg_jamendo_moodtheme-discogs-effnet-1":
+			jamHappy := classProb(avg, head.classes, "happy")
+			jamSad := classProb(avg, head.classes, "sad")
+			jamMelancholic := classProb(avg, head.classes, "melancholic")
+			jamCalm := maxf(
+				classProb(avg, head.classes, "calm"),
+				classProb(avg, head.classes, "relaxing"),
+			)
+			jamHeavy := classProb(avg, head.classes, "heavy")
+			jamPowerful := classProb(avg, head.classes, "powerful")
+			jamDark := classProb(avg, head.classes, "dark")
+			jamParty := classProb(avg, head.classes, "party")
+			jamendoPositive = maxf(
+				jamHappy,
+				0.55*classProb(avg, head.classes, "positive")+
+					0.45*classProb(avg, head.classes, "uplifting"),
+			)
+			jamendoNegative = maxf(jamSad, jamMelancholic)
+			jamendoEnergy = clamp01(
+				0.45*classProb(avg, head.classes, "energetic") +
+					0.35*jamPowerful +
+					0.20*jamHeavy,
+			)
+			result.MoodHappy = maxf(result.MoodHappy, jamHappy)
+			result.MoodSad = maxf(result.MoodSad, jamendoNegative)
+			result.MoodRelaxed = clamp01(0.65*result.MoodRelaxed + 0.35*jamCalm)
+			result.MoodParty = maxf(result.MoodParty, jamParty)
+			result.MoodAggressive = maxf(
+				result.MoodAggressive,
+				clamp01(0.65*jamHeavy+0.20*jamPowerful+0.15*jamDark),
+			)
 			result.Melodicness = clamp01(
 				0.65*classProb(avg, head.classes, "melodic") +
 					0.20*classProb(avg, head.classes, "emotional") +
@@ -983,8 +1094,8 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 					0.20*classProb(avg, head.classes, "relaxing"),
 			)
 			result.Heaviness = clamp01(
-				0.50*classProb(avg, head.classes, "heavy") +
-					0.30*classProb(avg, head.classes, "powerful") +
+				0.50*jamHeavy +
+					0.30*jamPowerful +
 					0.20*classProb(avg, head.classes, "dramatic"),
 			)
 			result.Dreaminess = clamp01(
@@ -994,15 +1105,20 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 			)
 			result.Emotionality = clamp01(
 				0.45*classProb(avg, head.classes, "emotional") +
-					0.25*classProb(avg, head.classes, "melancholic") +
+					0.25*jamMelancholic +
 					0.15*classProb(avg, head.classes, "romantic") +
 					0.15*classProb(avg, head.classes, "dramatic"),
 			)
 		}
 	}
 
-	result.Valence = clamp01((result.MoodHappy + (1 - result.MoodSad)) * 0.5)
-	result.Energy = clamp01(maxf(result.MoodParty, result.MoodAggressive*0.85))
+	positiveMood := maxf(result.MoodHappy, jamendoPositive)
+	negativeMood := maxf(result.MoodSad, jamendoNegative)
+	result.Valence = clamp01(0.5 + 0.5*(positiveMood-negativeMood))
+	result.Energy = clamp01(maxf(
+		jamendoEnergy,
+		maxf(result.MoodParty*0.85, result.MoodAggressive*0.90),
+	))
 	result.Melodicness = clamp01(maxf(result.Melodicness, 0.15*result.Tonality))
 	result.Softness = clamp01(maxf(result.Softness, 0.20*result.MoodRelaxed))
 	result.Heaviness = clamp01(maxf(result.Heaviness, 0.30*result.MoodAggressive))
@@ -1101,13 +1217,6 @@ func (e *EssentiaEngine) runDiscogs(patches []float32, patchCount int) (struct {
 	}
 
 	return result, nil
-}
-
-func makeDiscogsMelSpectrogramFromFlat(mel []float32, frameCount, melBands int) ([]float32, int, error) {
-	if len(mel) == 0 {
-		return nil, 0, errors.New("empty mel")
-	}
-	return mel, frameCount, nil
 }
 
 func (e *EssentiaEngine) runHead(ctx context.Context, head *essentiaHead, patchEmbeddings []float32, validPatches int) ([]float32, error) {
@@ -1416,7 +1525,12 @@ func buildGenreTagsForUI(groups []GenreGroupCandidate, limit int) []GenreTag {
 				continue
 			}
 		}
-		tags = append(tags, GenreTag{Label: label, Detail: g.BestSubLabel, Score: float64(g.Score), Rank: len(tags) + 1, Support: g.Support})
+		detail := ""
+		if g.BestSubScore >= genreDetailMinScore &&
+			!isNoisyGenreDetail(g.BestSubLabel, g) {
+			detail = g.BestSubLabel
+		}
+		tags = append(tags, GenreTag{Label: label, Detail: detail, Score: float64(g.Score), Rank: len(tags) + 1, Support: g.Support})
 	}
 	return tags
 }
@@ -1479,28 +1593,38 @@ func acceptTopGenre(g GenreGroupCandidate) bool {
 	if isNoisyDisplayGenre(g.Label) {
 		return false
 	}
-	switch g.Label {
-	case "Rock", "Electronic", "Pop", "Hip Hop", "Funk", "Reggae", "Jazz":
-		return g.Score >= 0.035 || g.BestSubScore >= 0.05
-	default:
-		return g.Score >= 0.05 || g.BestSubScore >= 0.07
-	}
+	return g.Score >= genrePrimaryMinScore
 }
 
 func acceptSecondaryGenre(g GenreGroupCandidate, topScore float32) bool {
 	if isNoisyDisplayGenre(g.Label) {
 		return false
 	}
-	if g.Score < 0.03 {
+	if g.Score < 0.08 {
 		return false
 	}
-	if g.Score < topScore*0.35 {
+	if g.Score < topScore*0.50 {
 		return false
 	}
-	if g.Support <= 1 && g.Score < 0.04 {
+	if g.Support <= 1 && g.Score < 0.10 {
 		return false
 	}
 	return true
+}
+
+func isNoisyGenreDetail(detail string, group GenreGroupCandidate) bool {
+	value := strings.ToLower(strings.TrimSpace(detail))
+	switch {
+	case strings.Contains(value, "dj battle tool"):
+		return true
+	case strings.Contains(value, "funeral doom metal"):
+		return true
+	case strings.Contains(value, "black metal") &&
+		(group.BestSubScore < 0.30 || group.Support < 2):
+		return true
+	default:
+		return false
+	}
 }
 
 func isNoisyDisplayGenre(label string) bool {
@@ -1639,15 +1763,108 @@ func averageHeadPredictions(data []float32, validRows int) []float32 {
 	return out
 }
 
-func regressionHeadValue(probs []float32) float64 {
-	if len(probs) == 0 {
-		return 0
+type regressionHeadDiagnostics struct {
+	Value      float64
+	RawMin     float64
+	RawMax     float64
+	RawMean    float64
+	RawStd     float64
+	ValidRows  int
+	OutOfRange int
+	Saturated  bool
+	Reliable   bool
+}
+
+func aggregateRegressionHead(data []float32, rows int) regressionHeadDiagnostics {
+	d := regressionHeadDiagnostics{Value: 0.5}
+	if rows <= 0 || len(data) == 0 || len(data)%rows != 0 {
+		return d
 	}
-	v := float64(probs[0])
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0
+	dims := len(data) / rows
+	if dims <= 0 {
+		return d
 	}
-	return clamp01(v)
+	values := make([]float64, 0, rows)
+	for row := 0; row < rows; row++ {
+		v := float64(data[row*dims])
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		values = append(values, v)
+		if v < -0.05 || v > 1.05 {
+			d.OutOfRange++
+		}
+	}
+	if len(values) == 0 {
+		return d
+	}
+	d.ValidRows = len(values)
+	sort.Float64s(values)
+	d.RawMin = values[0]
+	d.RawMax = values[len(values)-1]
+	for _, v := range values {
+		d.RawMean += v
+	}
+	d.RawMean /= float64(len(values))
+	variance := 0.0
+	for _, v := range values {
+		delta := v - d.RawMean
+		variance += delta * delta
+	}
+	d.RawStd = math.Sqrt(variance / float64(len(values)))
+	d.Saturated = d.ValidRows >= 4 && d.RawStd < 1e-5 &&
+		(d.RawMean <= 0.005 || d.RawMean >= 0.995)
+	if d.OutOfRange > maxInt(1, d.ValidRows/4) || d.Saturated {
+		return d
+	}
+	start := len(values) / 10
+	end := len(values) - start
+	if start >= end {
+		start = 0
+		end = len(values)
+	}
+	sum := 0.0
+	for _, v := range values[start:end] {
+		sum += clamp01(v)
+	}
+	d.Value = sum / float64(end-start)
+	d.Reliable = true
+	return d
+}
+
+func logRegressionHead(name string, d regressionHeadDiagnostics) {
+	level := "ok"
+	if !d.Reliable {
+		level = "invalid"
+	}
+	essentiaLog.I(
+		"regression head name=%s state=%s value=%.4f rawMin=%.4f rawMax=%.4f rawMean=%.4f rawStd=%.5f validRows=%d outOfRange=%d saturated=%t",
+		name,
+		level,
+		d.Value,
+		d.RawMin,
+		d.RawMax,
+		d.RawMean,
+		d.RawStd,
+		d.ValidRows,
+		d.OutOfRange,
+		d.Saturated,
+	)
+}
+
+func flattenPatchPredictions(rows [][]float32) []float32 {
+	if len(rows) == 0 {
+		return nil
+	}
+	total := 0
+	for _, row := range rows {
+		total += len(row)
+	}
+	out := make([]float32, 0, total)
+	for _, row := range rows {
+		out = append(out, row...)
+	}
+	return out
 }
 
 func headClassProbability(head *essentiaHead, probs []float32, positiveHints ...string) float64 {

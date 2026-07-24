@@ -1092,17 +1092,23 @@ func (s *Store) migrate() error {
 		UPDATE tracks
 		SET analysis_status = 'pending',
 		    analysis_version = 0,
-		    analysis_error = 'invalid ONNX migration result',
-		    genre = '',
-		    genre_label = '',
-		    genre_detail = ''
+		    analysis_error = 'invalid or stale ONNX analysis result',
+		    embedding = CASE
+		        WHEN embedding IS NOT NULL AND length(embedding) != ? THEN NULL
+		        ELSE embedding
+		    END,
+		    genre = CASE WHEN genre = '' THEN 'Unknown' ELSE genre END,
+		    genre_primary = '',
+		    genre_detail = '',
+		    genre_tags = '',
+		    genre_label = ''
 		WHERE source_type != 'pending_external'
 		  AND (
-		    length(embedding) = ?
+		    (embedding IS NOT NULL AND length(embedding) != ?)
 		    OR genre = ''
 		  )
 	`,
-		16*4,
+		1280*4, 1280*4,
 	); err != nil {
 		return err
 	}

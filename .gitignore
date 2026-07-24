@@ -7,3 +7,6 @@ dev-docs/
 .go*
 .cache
 .DS_Store
+
+# Downloaded runtime/model assets are local-only and reproducible via `just deps`.
+assets/runtime/

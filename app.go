@@ -221,11 +221,19 @@ func NewApp() *App {
 	}
 	miniLMDir := strings.TrimSpace(appSettings.MiniLMModelDir)
 	if miniLMDir == "" {
-		miniLMDir, _ = filepath.Abs(filepath.Join("..", "bm25-search1", "assets", "models", "paraphrase-multilingual-MiniLM-L12-v2_onnx", "quantized_arm64"))
+		miniLMDir, _ = filepath.Abs(filepath.Join(
+			"assets",
+			"runtime",
+			"models",
+			"paraphrase-multilingual-MiniLM-L12-v2_onnx",
+		))
 	}
 	if miniLMDir != "" {
 		if eng, initErr := onnx.New(runtimePath, miniLMDir); initErr == nil {
 			engine = eng
+			appLog.I("MiniLM engine ready modelDir=%q", miniLMDir)
+		} else {
+			appLog.W("MiniLM engine unavailable modelDir=%q err=%v", miniLMDir, initErr)
 		}
 	}
 	if modelDir != "" {
@@ -237,6 +245,9 @@ func NewApp() *App {
 		}
 		if tempoEng, initErr := onnx.NewTempoEngine(runtimePath, modelDir); initErr == nil {
 			tempoEngine = tempoEng
+			appLog.I("tempo engine ready modelDir=%q", modelDir)
+		} else {
+			appLog.W("tempo engine unavailable modelDir=%q err=%v", modelDir, initErr)
 		}
 	}
 
@@ -388,6 +399,10 @@ func (a *App) shutdown(ctx context.Context) {
 	a.cancelPlayRequest()
 	a.persistPlaybackSession(true)
 	a.persistCurrentRayState()
+
+	if a.library != nil {
+		a.library.Close()
+	}
 
 	if a.onnx != nil {
 		_ = a.onnx.Close()

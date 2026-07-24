@@ -114,18 +114,36 @@ func (e *Engine) Close() error {
 	if e == nil {
 		return nil
 	}
-	if e.session != nil {
-		_ = e.session.Destroy()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.session == nil {
+		return nil
 	}
-	return ReleaseEnvironment()
+	sessionErr := e.session.Destroy()
+	e.session = nil
+	environmentErr := ReleaseEnvironment()
+	if sessionErr != nil {
+		return sessionErr
+	}
+	return environmentErr
 }
 
 func (e *Engine) Ready() bool {
-	return e != nil && e.session != nil && e.tokenizer != nil
+	if e == nil {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.session != nil && e.tokenizer != nil
 }
 
 func (e *Engine) Encode(ctx context.Context, text string) ([]float32, error) {
-	if !e.Ready() {
+	if e == nil {
+		return nil, errors.New("onnx not ready")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.session == nil || e.tokenizer == nil {
 		return nil, errors.New("onnx not ready")
 	}
 	enc, err := e.encodeSingleSafe(text)
@@ -147,9 +165,6 @@ func (e *Engine) Encode(ctx context.Context, text string) ([]float32, error) {
 	if len(types) == 0 {
 		types = make([]int, len(ids))
 	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	shape := ort.NewShape(1, int64(len(ids)))
 	inputs := make([]*ort.Tensor[int64], 0, len(e.inputNames))

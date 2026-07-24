@@ -65,12 +65,36 @@ func TestAverageHeadPredictionsAveragesPerPatch(t *testing.T) {
 	}
 }
 
-func TestRegressionHeadValueClamps(t *testing.T) {
-	if got := regressionHeadValue([]float32{1.2}); got != 1 {
-		t.Fatalf("expected clamp to 1, got %f", got)
+func TestAggregateRegressionHeadRejectsOutOfRangeSaturation(t *testing.T) {
+	d := aggregateRegressionHead([]float32{4.2, 3.8, 4.4, 3.9}, 4)
+	if d.Reliable {
+		t.Fatalf("out-of-range regression output must be rejected: %+v", d)
 	}
-	if got := regressionHeadValue([]float32{-0.2}); got != 0 {
-		t.Fatalf("expected clamp to 0, got %f", got)
+	if d.Value != 0.5 {
+		t.Fatalf("invalid regression must use neutral fallback, got %.3f", d.Value)
+	}
+	if d.OutOfRange != 4 {
+		t.Fatalf("outOfRange=%d want=4", d.OutOfRange)
+	}
+}
+
+func TestAggregateRegressionHeadRejectsExactBoundaryLock(t *testing.T) {
+	d := aggregateRegressionHead([]float32{1, 1, 1, 1, 1, 1}, 6)
+	if d.Reliable || !d.Saturated {
+		t.Fatalf("exact regression boundary lock must be rejected: %+v", d)
+	}
+	if d.Value != 0.5 {
+		t.Fatalf("saturated regression must use neutral fallback, got %.3f", d.Value)
+	}
+}
+
+func TestAggregateRegressionHeadUsesTrimmedMean(t *testing.T) {
+	d := aggregateRegressionHead([]float32{0.2, 0.4, 0.6, 0.8}, 4)
+	if !d.Reliable {
+		t.Fatalf("expected reliable regression output: %+v", d)
+	}
+	if math.Abs(d.Value-0.5) > 0.0001 {
+		t.Fatalf("value=%.4f want=0.5", d.Value)
 	}
 }
 
@@ -145,8 +169,8 @@ func TestBuildHeadProbeUsesPerRowSeries(t *testing.T) {
 
 func TestRegressionHeadProbeAvoidsBinaryWarnings(t *testing.T) {
 	head := &essentiaHead{name: "approachability_regression-discogs-effnet-1", inputName: "embeddings", outputName: "activations", classes: []string{"approachability"}}
-	probs := []float32{4.2, 3.8, 4.4, 3.9}
-	report := buildHeadProbe("approachability_regression-discogs-effnet-1", head, []float32{4.1}, probs, ProbeOptions{IncludePatchRows: true})
+	probs := []float32{0.42, 0.38, 0.44, 0.39}
+	report := buildHeadProbe("approachability_regression-discogs-effnet-1", head, []float32{0.41}, probs, ProbeOptions{IncludePatchRows: true})
 	if report.PositiveStats.Count != 4 {
 		t.Fatalf("expected regression series count 4, got %d", report.PositiveStats.Count)
 	}
@@ -209,5 +233,51 @@ func TestDecodeTempoOutputAndMajorityVoting(t *testing.T) {
 	result := AggregateTempoMajorityVoting([]tempoPrediction{{BPM: 64, Confidence: 0.7}, {BPM: 128, Confidence: 0.8}, {BPM: 127, Confidence: 0.6}})
 	if result.BPM != 128 {
 		t.Fatalf("expected perceived majority bucket 128, got %f", result.BPM)
+	}
+}
+
+func TestGenreTagsSuppressNoisyWeakDetails(t *testing.T) {
+	groups := []GenreGroupCandidate{
+		{
+			Label:        "Rock",
+			Score:        0.22,
+			BestSubLabel: "Rock / Black Metal",
+			BestSubScore: 0.22,
+			Support:      1,
+		},
+	}
+	tags := buildGenreTagsForUI(groups, 3)
+	if len(tags) != 1 {
+		t.Fatalf("tags=%#v", tags)
+	}
+	if tags[0].Label != "Rock" {
+		t.Fatalf("label=%q want Rock", tags[0].Label)
+	}
+	if tags[0].Detail != "" {
+		t.Fatalf("weak noisy detail must be suppressed, got %q", tags[0].Detail)
+	}
+}
+
+func TestGenreTagsRequireConfidentPrimary(t *testing.T) {
+	groups := []GenreGroupCandidate{{
+		Label:        "Hip Hop",
+		Score:        0.10,
+		BestSubLabel: "Hip Hop / DJ Battle Tool",
+		BestSubScore: 0.11,
+		Support:      1,
+	}}
+	if tags := buildGenreTagsForUI(groups, 3); len(tags) != 0 {
+		t.Fatalf("weak primary must be rejected, got %#v", tags)
+	}
+}
+
+func TestFlattenPatchPredictionsPreservesAllRows(t *testing.T) {
+	rows := [][]float32{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}
+	got := flattenPatchPredictions(rows)
+	if len(got) != 6 {
+		t.Fatalf("len=%d want=6", len(got))
+	}
+	if got[0] != 0.1 || got[5] != 0.6 {
+		t.Fatalf("unexpected flattened values: %#v", got)
 	}
 }

@@ -81,18 +81,12 @@ export const activePalette = derived(
 	[emoFlowState, emoFlowSettings, trackProgress],
 	([$emo, $settings, $progress]) => {
 		if (!$settings.enabled) return DEFAULT_PALETTE;
-		const previous = $emo.previous?.palette || $emo.palette || DEFAULT_PALETTE;
 		const current = $emo.current?.palette || $emo.palette || DEFAULT_PALETTE;
 		const next = $emo.next?.palette || current;
 		if (!$settings.animateDuringTrack) {
 			return mixPalette(DEFAULT_PALETTE, current, $settings.intensity);
 		}
-		const interpolated = interpolateTrackPalette(
-			previous,
-			current,
-			next,
-			$progress,
-		);
+		const interpolated = interpolateTrackPalette(current, next, $progress);
 		return mixPalette(
 			DEFAULT_PALETTE,
 			interpolated,
@@ -133,7 +127,7 @@ export const cssVariables = derived(
 	}),
 );
 
-function mergeEmoFlowState(state, nextState) {
+export function mergeEmoFlowState(state, nextState) {
 	const normalized = nextState ? normalizeMoodForColor(nextState) : nextState;
 	const palette = normalized?.palette?.accent
 		? normalized.palette
@@ -157,20 +151,26 @@ function mergeEmoFlowState(state, nextState) {
 				palette: normalized.current.palette || palette,
 			}
 		: state?.current || null;
+	const hasPrevious = Boolean(normalized) && Object.prototype.hasOwnProperty.call(normalized, "previous");
+	const hasNext = Boolean(normalized) && Object.prototype.hasOwnProperty.call(normalized, "next");
 	merged.previous = normalized?.previous
 		? {
-				...(state?.previous || {}),
+				...(sameCurrentTrack ? state?.previous || {} : {}),
 				...normalized.previous,
 				palette: normalized.previous.palette || palette,
 			}
-		: state?.previous || null;
+		: hasPrevious
+			? null
+			: state?.previous || null;
 	merged.next = normalized?.next
 		? {
-				...(state?.next || {}),
+				...(sameCurrentTrack ? state?.next || {} : {}),
 				...normalized.next,
 				palette: normalized.next.palette || palette,
 			}
-		: state?.next || null;
+		: hasNext
+			? null
+			: state?.next || null;
 	return merged;
 }
 
@@ -265,11 +265,15 @@ function computeMotion(vector, direction, settings) {
 	return motion;
 }
 
-function interpolateTrackPalette(prev, current, next, progress) {
-	if (progress < 0.25) return mixPalette(prev, current, progress / 0.25);
-	if (progress > 0.75 && next)
-		return mixPalette(current, next, (progress - 0.75) / 0.25);
-	return current;
+export function interpolateTrackPalette(current, next, progress) {
+	const p = clamp01(progress);
+	const handoffStart = 0.82;
+	if (!next || p <= handoffStart) return current;
+
+	// The outgoing track owns the colour until its final section.  By the
+	// natural end we have already reached the incoming track palette, so the
+	// next track starts with the same colour instead of flashing the old one.
+	return mixPalette(current, next, (p - handoffStart) / (1 - handoffStart));
 }
 
 function mixPalette(a, b, t) {

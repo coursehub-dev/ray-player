@@ -161,16 +161,16 @@ type MoodBasis struct {
 }
 
 var moodAnchors = map[string]oklchColor{
-	"happy":      {L: 0.78, C: 0.19, H: 82},
-	"party":      {L: 0.72, C: 0.22, H: 42},
-	"aggressive": {L: 0.64, C: 0.24, H: 25},
-	"sad":        {L: 0.62, C: 0.18, H: 265},
-	"relaxed":    {L: 0.72, C: 0.16, H: 185},
-	"acoustic":   {L: 0.76, C: 0.14, H: 70},
+	"happy":      {L: 0.76, C: 0.20, H: 48},
+	"party":      {L: 0.70, C: 0.22, H: 32},
+	"aggressive": {L: 0.63, C: 0.24, H: 22},
+	"sad":        {L: 0.61, C: 0.18, H: 272},
+	"relaxed":    {L: 0.68, C: 0.16, H: 225},
+	"acoustic":   {L: 0.70, C: 0.13, H: 250},
 	"electronic": {L: 0.68, C: 0.22, H: 220},
 	"dreamy":     {L: 0.70, C: 0.20, H: 300},
 	"dark":       {L: 0.55, C: 0.18, H: 255},
-	"soft":       {L: 0.78, C: 0.12, H: 340},
+	"soft":       {L: 0.74, C: 0.12, H: 288},
 	"default":    {L: 0.62, C: 0.08, H: 230},
 }
 
@@ -496,10 +496,10 @@ func accentFromMoodBasis(m MoodBasis) oklchColor {
 		return oklchColor{L: 0.62, C: 0.14, H: 225}
 	}
 	if m.Warmth > 0.60 && m.Coolness < 0.50 {
-		return oklchColor{L: 0.70, C: 0.16, H: 80}
+		return oklchColor{L: 0.69, C: 0.17, H: 48}
 	}
 	if m.Motion > 0.58 {
-		return oklchColor{L: 0.62, C: 0.16, H: 38}
+		return oklchColor{L: 0.62, C: 0.17, H: 32}
 	}
 	return oklchColor{L: 0.60, C: 0.07, H: 230}
 }

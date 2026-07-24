@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -174,13 +175,21 @@ type Service struct {
 	order         []string
 	analysisQueue chan analysisJob
 	inFlight      map[string]bool
+	requeue       map[string]analysisJob
 	workerCount   int
 	hook          analyzedHook
 	indexingHook  func(IndexingState)
 	indexing      IndexingState
+
+	ctx       context.Context
+	cancel    context.CancelFunc
+	workers   sync.WaitGroup
+	closeOnce sync.Once
+	closed    bool
 }
 
 func NewService(store *db.Store, engine *onnx.Engine, essentia *onnx.EssentiaEngine, tempo *onnx.TempoEngine) *Service {
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{
 		store:         store,
 		onnx:          engine,
@@ -188,13 +197,30 @@ func NewService(store *db.Store, engine *onnx.Engine, essentia *onnx.EssentiaEng
 		tempo:         tempo,
 		cache:         map[string]Track{},
 		inFlight:      map[string]bool{},
+		requeue:       map[string]analysisJob{},
 		analysisQueue: make(chan analysisJob, 512),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	s.workerCount = 1
 	for i := 0; i < s.workerCount; i++ {
+		s.workers.Add(1)
 		go s.workerLoop()
 	}
 	return s
+}
+
+func (s *Service) Close() {
+	if s == nil {
+		return
+	}
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		s.mu.Unlock()
+		s.cancel()
+		s.workers.Wait()
+	})
 }
 
 func (s *Service) UpdateEngines(engine *onnx.Engine, essentia *onnx.EssentiaEngine, tempo *onnx.TempoEngine) {
@@ -202,12 +228,23 @@ func (s *Service) UpdateEngines(engine *onnx.Engine, essentia *onnx.EssentiaEngi
 	s.onnx = engine
 	s.essentia = essentia
 	s.tempo = tempo
+	if s.requeue == nil {
+		s.requeue = map[string]analysisJob{}
+	}
 	jobs := s.collectEmbeddingRepairJobsLocked()
+	pending := make([]analysisJob, 0, len(jobs))
+	for _, job := range jobs {
+		if s.inFlight[job.TrackID] {
+			s.requeue[job.TrackID] = job
+			continue
+		}
+		pending = append(pending, job)
+	}
 	s.mu.Unlock()
-	s.enqueueAnalysisJobs(jobs)
+	s.enqueueAnalysisJobs(pending)
 	if len(jobs) > 0 {
 		s.beginIndexing(len(jobs), "repairing")
-		libLog.I("queued embedding repairs after engine update count=%d", len(jobs))
+		libLog.I("queued embedding repairs after engine update count=%d deferred=%d", len(jobs), len(jobs)-len(pending))
 	}
 }
 
@@ -245,8 +282,8 @@ func (s *Service) collectEmbeddingRepairJobsLocked() []analysisJob {
 	return jobs
 }
 
-const currentAnalysisVersion = 13
-const currentEssentiaModelVersion = "discogs-effnet-bs64-1+genre-head-v5-emoflow"
+const currentAnalysisVersion = CurrentAnalysisVersion
+const currentEssentiaModelVersion = CurrentEssentiaModelVersion
 
 func (s *Service) beginIndexing(total int, phase string) {
 	s.mu.Lock()
@@ -591,7 +628,7 @@ func (s *Service) rebuildTracks(ctx context.Context, tracks []Track, progress fu
 		if progress != nil {
 			progress(RebuildProgress{Index: i + 1, Total: len(tracks), TrackID: existing.ID, Path: existing.Path, Stage: "metadata", State: "running", Message: "metadata read"})
 		}
-		track, err := s.analyzeTrack(analysisJob{TrackID: existing.ID, Path: existing.Path, Meta: meta, Source: metaSource})
+		track, err := s.analyzeTrack(ctx, analysisJob{TrackID: existing.ID, Path: existing.Path, Meta: meta, Source: metaSource})
 		if progress != nil && err != nil {
 			progress(RebuildProgress{Index: i + 1, Total: len(tracks), TrackID: existing.ID, Path: existing.Path, Stage: "analyze", State: "error", Message: err.Error()})
 		}
@@ -658,16 +695,17 @@ func (s *Service) enqueueAnalysis(trackID, path string, meta map[string]string, 
 
 func (s *Service) enqueueAnalysisJob(job analysisJob) {
 	s.mu.Lock()
-	if s.inFlight[job.TrackID] {
+	if s.closed || s.inFlight[job.TrackID] {
 		s.mu.Unlock()
 		return
 	}
 	s.inFlight[job.TrackID] = true
 	s.mu.Unlock()
+
 	select {
 	case s.analysisQueue <- job:
-	default:
-		go func() { s.analysisQueue <- job }()
+	case <-s.ctx.Done():
+		s.finishAnalysis(job.TrackID)
 	}
 }
 
@@ -687,13 +725,20 @@ func safeAnalyzeTrack(fn func() error) (err error) {
 }
 
 func (s *Service) workerLoop() {
-	for job := range s.analysisQueue {
+	defer s.workers.Done()
+	for {
+		var job analysisJob
+		select {
+		case <-s.ctx.Done():
+			return
+		case job = <-s.analysisQueue:
+		}
 		s.updateIndexingCurrent(job.Path, "analyzing")
 		_ = s.store.MarkTrackAnalysisStatus(job.TrackID, string(AnalysisRunning), "", 1)
 		err := safeAnalyzeTrack(func() error {
 			defer s.finishAnalysis(job.TrackID)
 			defer s.finishIndexingOne(job.Path)
-			track, err := s.analyzeTrack(job)
+			track, err := s.analyzeTrack(s.ctx, job)
 			if err != nil {
 				return err
 			}
@@ -701,8 +746,10 @@ func (s *Service) workerLoop() {
 			if err := s.Upsert(track); err != nil {
 				return err
 			}
-			_ = s.store.MarkTrackReady(track.ID)
-			libLog.I("db upsert done id=%s ms=%d emb=%d", track.ID, time.Since(dbStart).Milliseconds(), len(track.Embedding))
+			if track.AnalysisStatus == string(AnalysisDone) {
+				_ = s.store.MarkTrackReady(track.ID)
+			}
+			libLog.I("db upsert done id=%s status=%s version=%d ms=%d emb=%d", track.ID, track.AnalysisStatus, track.AnalysisVersion, time.Since(dbStart).Milliseconds(), len(track.Embedding))
 			s.mu.RLock()
 			hook := s.hook
 			s.mu.RUnlock()
@@ -712,6 +759,10 @@ func (s *Service) workerLoop() {
 			return nil
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) && s.ctx.Err() != nil {
+				libLog.I("analysis canceled id=%s path=%q", job.TrackID, job.Path)
+				continue
+			}
 			libLog.E("analyze failed id=%s path=%q err=%v", job.TrackID, job.Path, err)
 			_ = s.store.MarkTrackAnalysisStatus(job.TrackID, string(AnalysisError), err.Error(), 1)
 			_ = s.store.AddFileError(db.FileErrorRow{ID: fmt.Sprintf("err-%d", time.Now().UnixNano()), TrackID: job.TrackID, Path: job.Path, LibraryType: "music", Stage: "analyze", Kind: "decode_or_analysis_failed", Message: err.Error(), CreatedAt: time.Now().Unix()})
@@ -720,12 +771,41 @@ func (s *Service) workerLoop() {
 }
 
 func (s *Service) finishAnalysis(trackID string) {
+	var retry analysisJob
+	hasRetry := false
 	s.mu.Lock()
 	delete(s.inFlight, trackID)
+	if job, ok := s.requeue[trackID]; ok {
+		delete(s.requeue, trackID)
+		if !s.closed {
+			s.inFlight[trackID] = true
+			retry = job
+			hasRetry = true
+		}
+	}
 	s.mu.Unlock()
+	if !hasRetry {
+		return
+	}
+	select {
+	case s.analysisQueue <- retry:
+		libLog.I("analysis requeued after engine reload id=%s", retry.TrackID)
+	case <-s.ctx.Done():
+		s.mu.Lock()
+		delete(s.inFlight, retry.TrackID)
+		s.mu.Unlock()
+	default:
+		s.mu.Lock()
+		delete(s.inFlight, retry.TrackID)
+		s.mu.Unlock()
+		libLog.W("analysis requeue skipped id=%s reason=queue-full", retry.TrackID)
+	}
 }
 
-func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
+func (s *Service) analyzeTrack(parent context.Context, job analysisJob) (Track, error) {
+	if parent == nil {
+		parent = s.ctx
+	}
 	start := time.Now()
 	libLog.D("analyze start id=%s source=%s path=%s", job.TrackID, job.Source, job.Path)
 
@@ -745,7 +825,7 @@ func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
 	onnxEngine := s.onnx
 	tempoEngine := s.tempo
 	s.mu.RUnlock()
-	ctx, cancelAnalyze := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancelAnalyze := context.WithTimeout(parent, 2*time.Minute)
 	defer cancelAnalyze()
 	features, durMs, featErr := analysis.ExtractWithContext(ctx, job.Path)
 	if featErr != nil {
@@ -766,7 +846,7 @@ func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
 		track.ID = existing.ID
 	}
 	if tempoEngine != nil && tempoEngine.Ready() {
-		tempoCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		tempoCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		if tempo, tempoErr := tempoEngine.AnalyzePath(tempoCtx, job.Path); tempoErr != nil {
 			track.TempoSource = "error"
 			track.TempoError = tempoErr.Error()
@@ -794,35 +874,37 @@ func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
 		}
 		cancel()
 	}
-	track.AnalyzedLevel = 2
-	track.AnalysisVersion = currentAnalysisVersion
 	track.AnalyzedAt = time.Now().Unix()
-	track.AnalysisError = ""
 	track.LastError = ""
 	track.ImportStatus = string(ImportReady)
-	track.AnalysisStatus = string(AnalysisDone)
 	track.FileMissing = false
-	track.EssentiaModelVersion = currentEssentiaModelVersion
-	track.Embedding = l2Normalize(append([]float32{}, features.Embedding...))
+	track.Embedding = nil // compact DSP features are not a semantic embedding
+	semanticReady := false
+	var semanticErr error
 	genreScore := 0.0
 	genreMargin := 0.0
 	libLog.I("pre-essentia compactFeatures=%d semanticEmbedding=%d essentia=%v ready=%v", 16, len(track.Embedding), essentia != nil, essentia != nil && essentia.Ready())
 	libLog.D("fast features path=%s durMs=%d tempo=%.2f energy=%.3f dance=%.3f valence=%.3f acou=%.3f instr=%.3f", job.Path, durMs, features.Tempo, features.Energy, features.Danceability, features.Valence, features.Acousticness, features.Instrumentalness)
 	if essentia != nil && essentia.Ready() {
 		melStart := time.Now()
-		mel, patches, err := analysis.ExtractMelSpectrogram(job.Path)
+		mel, patches, err := analysis.ExtractMelSpectrogramWithContext(ctx, job.Path)
 		if err != nil {
+			semanticErr = fmt.Errorf("mel extraction: %w", err)
 			libLog.I("mel extract failed path=%s err=%v ms=%d", job.Path, err, time.Since(melStart).Milliseconds())
 		} else if patches <= 0 {
+			semanticErr = errors.New("mel extraction returned no patches")
 			libLog.D("mel extract empty path=%s patches=%d len=%d ms=%d", job.Path, patches, len(mel), time.Since(melStart).Milliseconds())
 		} else {
 			libLog.D("mel extract done path=%s ms=%d len=%d patches=%d", job.Path, time.Since(melStart).Milliseconds(), len(mel), patches)
 			essentiaStart := time.Now()
-			if ml, err := essentia.Analyze(context.Background(), mel, patches); err != nil {
+			if ml, err := essentia.Analyze(ctx, mel, patches); err != nil {
+				semanticErr = fmt.Errorf("Essentia inference: %w", err)
 				libLog.I("essentia analyze failed path=%s err=%v ms=%d", job.Path, err, time.Since(essentiaStart).Milliseconds())
-			} else if len(ml.Embedding) == 0 {
-				libLog.D("essentia analyze returned empty embedding path=%s ms=%d", job.Path, time.Since(essentiaStart).Milliseconds())
+			} else if len(ml.Embedding) != modelcontract.DiscogsEmbeddingSize {
+				semanticErr = fmt.Errorf("Essentia embedding size=%d want=%d", len(ml.Embedding), modelcontract.DiscogsEmbeddingSize)
+				libLog.W("essentia invalid embedding path=%s got=%d want=%d ms=%d", job.Path, len(ml.Embedding), modelcontract.DiscogsEmbeddingSize, time.Since(essentiaStart).Milliseconds())
 			} else {
+				semanticReady = true
 				libLog.D("essentia analyze done path=%s ms=%d", job.Path, time.Since(essentiaStart).Milliseconds())
 				track.Danceability = blendMetric(track.Danceability, ml.Danceability, 0.7)
 				track.Valence = blendMetric(track.Valence, ml.Valence, 0.7)
@@ -856,9 +938,6 @@ func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
 					track.GenreLabel = genreLabelFromTags(track.GenreTags, track.GenrePrimary, track.GenreDetail)
 				}
 				track.Embedding = l2Normalize(append([]float32{}, ml.Embedding...))
-				if len(ml.Embedding) != 1280 {
-					libLog.I("essentia invalid embedding size path=%s got=%d want=1280", job.Path, len(ml.Embedding))
-				}
 				if strings.TrimSpace(ml.GenrePrimary) == "" && ml.GenreScore >= 0.06 {
 					libLog.I("essentia empty genre with score path=%s score=%.4f label=%q detail=%q", job.Path, ml.GenreScore, ml.GenreLabel, ml.GenreDetail)
 				}
@@ -866,10 +945,15 @@ func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
 			}
 		}
 	}
+	applySemanticAnalysisState(&track, semanticReady, semanticErr)
+	if strings.TrimSpace(track.GenreLabel) == "" &&
+		!strings.EqualFold(track.GenrePrimary, "unknown") {
+		track.GenreLabel = track.GenrePrimary
+	}
 	text := strings.TrimSpace(strings.Join([]string{track.Artist, track.Title, track.Genre, track.Album}, " "))
 	if onnxEngine != nil && onnxEngine.Ready() && text != "" {
 		textStart := time.Now()
-		if vec, err := onnxEngine.Encode(context.Background(), text); err == nil && len(vec) > 0 {
+		if vec, err := onnxEngine.Encode(ctx, text); err == nil && len(vec) > 0 {
 			track.TextEmbedding = append([]float32{}, vec...)
 			libLog.D("onnx text embedding stored path=%s dim=%d audioDim=%d ms=%d", job.Path, len(vec), len(track.Embedding), time.Since(textStart).Milliseconds())
 		} else if err != nil {
@@ -881,6 +965,33 @@ func (s *Service) analyzeTrack(job analysisJob) (Track, error) {
 		return Track{}, fmt.Errorf("refusing to persist invalid embedding id=%s size=%d want=1280", track.ID, len(track.Embedding))
 	}
 	return track, nil
+}
+
+
+func applySemanticAnalysisState(track *Track, semanticReady bool, semanticErr error) {
+	if track == nil {
+		return
+	}
+	if semanticReady && len(track.Embedding) == modelcontract.DiscogsEmbeddingSize {
+		track.AnalyzedLevel = 2
+		track.AnalysisVersion = currentAnalysisVersion
+		track.AnalysisStatus = string(AnalysisDone)
+		track.AnalysisError = ""
+		track.EssentiaModelVersion = currentEssentiaModelVersion
+		return
+	}
+
+	track.AnalyzedLevel = 1
+	track.AnalysisVersion = 0
+	track.EssentiaModelVersion = ""
+	track.Embedding = nil
+	if semanticErr != nil {
+		track.AnalysisStatus = string(AnalysisError)
+		track.AnalysisError = semanticErr.Error()
+		return
+	}
+	track.AnalysisStatus = string(AnalysisQueued)
+	track.AnalysisError = "semantic model unavailable; waiting for runtime/model"
 }
 
 func readMetadata(path string) (map[string]string, string) {
@@ -912,8 +1023,8 @@ func buildTrack(path string, meta map[string]string, source string, features ana
 		if strings.TrimSpace(meta["album"]) != "" {
 			album = meta["album"]
 		}
-		if strings.TrimSpace(meta["genre"]) != "" {
-			genre = meta["genre"]
+		if cleanedGenre := sanitizeMetadataGenre(meta["genre"]); cleanedGenre != "" {
+			genre = cleanedGenre
 		}
 	}
 	if durMs <= 0 {
@@ -928,8 +1039,12 @@ func makeFallbackTrack(path string, duration time.Duration) Track {
 }
 
 func TrackFromRow(r db.TrackRow) Track {
+	staleAnalysis := r.AnalysisVersion < currentAnalysisVersion ||
+		strings.TrimSpace(r.EssentiaModelVersion) != currentEssentiaModelVersion
 	embedding := r.Embedding
-	if len(embedding) != 0 &&
+	if staleAnalysis {
+		embedding = nil
+	} else if len(embedding) != 0 &&
 		len(embedding) != modelcontract.DiscogsEmbeddingSize {
 		libLog.W(
 			"ignore invalid stored embedding id=%s size=%d",
@@ -944,6 +1059,33 @@ func TrackFromRow(r db.TrackRow) Track {
 		_ = json.Unmarshal([]byte(r.GenreTagsJSON), &tags)
 	}
 	track := Track{ID: r.ID, Path: r.Path, Title: r.Title, Artist: r.Artist, Album: r.Album, Genre: r.Genre, GenrePrimary: r.GenrePrimary, GenreDetail: r.GenreDetail, GenreTags: tags, DurationMs: r.DurationMs, DurationLabel: r.DurationLabel, Folder: r.Folder, FileName: r.FileName, Tempo: r.Tempo, BPMPerceived: r.BPMPerceived, TempoConfidence: r.TempoConfidence, TempoStability: r.TempoStability, BPMHalf: r.BPMHalf, BPMDouble: r.BPMDouble, TempoSource: r.TempoSource, TempoModelVersion: r.TempoModelVersion, TempoAnalyzedAt: r.TempoAnalyzedAt, TempoError: r.TempoError, Energy: r.Energy, Danceability: r.Danceability, Valence: r.Valence, Acousticness: r.Acousticness, Electronicness: r.Electronicness, Instrumentalness: r.Instrumentalness, Vocalness: r.Vocalness, Happy: r.Happy, Sad: r.Sad, Relaxed: r.Relaxed, Party: r.Party, Aggressive: r.Aggressive, TimbreBrightness: r.TimbreBrightness, Tonality: r.Tonality, Approachability: r.Approachability, Engagement: r.Engagement, Melodicness: r.Melodicness, Softness: r.Softness, Heaviness: r.Heaviness, Dreaminess: r.Dreaminess, Emotionality: r.Emotionality, Loudness: r.Loudness, SpectralCentroid: r.SpectralCentroid, ZeroCrossingRate: r.ZeroCrossingRate, RMS: r.RMS, SpectralFlatness: r.SpectralFlatness, SpectralRolloff85: r.SpectralRolloff85, SpectralFlux: r.SpectralFlux, OnsetRate: r.OnsetRate, DynamicRange: r.DynamicRange, LowBandRatio: r.LowBandRatio, MidBandRatio: r.MidBandRatio, HighBandRatio: r.HighBandRatio, ClusterID: r.ClusterID, PlayCount: r.PlayCount, SkipCount: r.SkipCount, CompleteCount: r.CompleteCount, MetadataSource: r.MetadataSource, AnalyzedLevel: r.AnalyzedLevel, AnalysisVersion: r.AnalysisVersion, AnalyzedAt: r.AnalyzedAt, AnalysisError: r.AnalysisError, EssentiaModelVersion: r.EssentiaModelVersion, NormalizedPath: r.NormalizedPath, LibraryRootID: r.LibraryRootID, ImportStatus: r.ImportStatus, AnalysisStatus: r.AnalysisStatus, FileMissing: r.FileMissing, FileSize: r.FileSize, FileMTime: r.FileMTime, FileInode: r.FileInode, QuickHash: r.QuickHash, LastSeenAt: r.LastSeenAt, LastError: r.LastError, Embedding: embedding, TextEmbedding: r.TextEmbedding, PlaybackErrorCount: r.PlaybackErrorCount, LastPlaybackError: r.LastPlaybackError, LastPlaybackErrorAt: r.LastPlaybackErrorAt, ImportedAt: r.AddedAt, SourceType: r.SourceType, SourceURL: r.SourceURL, SourceSite: r.SourceSite, ExternalID: r.ExternalID, DownloadStatus: r.DownloadStatus, DownloadProgress: r.DownloadProgress, DownloadError: r.DownloadError, DownloadAttempts: r.DownloadAttempts, DownloadedAt: r.DownloadedAt, SearchText: strings.ToLower(strings.Join([]string{r.Title, r.Artist, r.Album, r.Genre, r.FileName, r.Folder}, " "))}
+	if staleAnalysis {
+		track.GenrePrimary = ""
+		track.GenreDetail = ""
+		track.GenreTags = nil
+		track.GenreLabel = sanitizeMetadataGenre(track.Genre)
+		if track.GenreLabel == "" {
+			track.GenreLabel = "Unknown"
+		}
+		track.Happy = 0
+		track.Sad = 0
+		track.Relaxed = 0
+		track.Party = 0
+		track.Aggressive = 0
+		track.Electronicness = 0
+		track.TimbreBrightness = 0
+		track.Tonality = 0
+		track.Approachability = 0.5
+		track.Engagement = 0.5
+		track.Melodicness = 0
+		track.Softness = 0
+		track.Heaviness = 0
+		track.Dreaminess = 0
+		track.Emotionality = 0
+		track.TempoConfidence = 0
+		track.TempoStability = 0
+		return track
+	}
 	if len(track.GenreTags) > 0 {
 		track.GenrePrimary = track.GenreTags[0].Label
 		track.GenreDetail = track.GenreTags[0].Detail
@@ -977,18 +1119,35 @@ func buildTags(t Track) string {
 }
 
 func chooseGenre(metaGenre, mlGenre string, mlScore, mlMargin float64) string {
-	metaGenre = strings.TrimSpace(metaGenre)
+	metaGenre = sanitizeMetadataGenre(metaGenre)
 	mlGenre = strings.TrimSpace(strings.ReplaceAll(mlGenre, "---", " / "))
-	if mlGenre == "" {
-		return metaGenre
-	}
-	if mlScore >= 0.06 || mlMargin >= 0.02 {
+	if mlGenre != "" && mlScore >= 0.15 && mlMargin >= 0.05 {
 		return mlGenre
 	}
-	if metaGenre != "" && !strings.EqualFold(metaGenre, "unknown") {
+	if metaGenre != "" {
 		return metaGenre
 	}
-	return mlGenre
+	return "Unknown"
+}
+
+var metadataGenreDomain = regexp.MustCompile(
+	`(?i)(?:https?://|www\.|[a-z0-9-]+\.(?:ru|kz|com|net|org|ua|me)(?:\b|/))`,
+)
+
+func sanitizeMetadataGenre(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	switch lower {
+	case "unknown", "unk", "other", "genre", "n/a", "none", "-":
+		return ""
+	}
+	if metadataGenreDomain.MatchString(value) {
+		return ""
+	}
+	return value
 }
 
 func genreLabelFromTags(tags []onnx.GenreTag, primary, detail string) string {

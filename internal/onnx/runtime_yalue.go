@@ -12,6 +12,7 @@ var (
 	environmentMu          sync.Mutex
 	environmentInitialized bool
 	environmentReferences  int
+	environmentLibraryPath string
 )
 
 func AcquireEnvironment() error {
@@ -19,17 +20,24 @@ func AcquireEnvironment() error {
 }
 
 func AcquireEnvironmentWithPath(runtimePath string) error {
+	libraryPath, err := resolveRuntimeLibraryWithOverride(runtimePath)
+	if err != nil {
+		return err
+	}
+
 	environmentMu.Lock()
 	defer environmentMu.Unlock()
 
 	if environmentInitialized {
+		if !sameRuntimeLibrary(environmentLibraryPath, libraryPath) {
+			return fmt.Errorf(
+				"ONNX Runtime already initialized from %q; refusing incompatible runtime %q",
+				environmentLibraryPath,
+				libraryPath,
+			)
+		}
 		environmentReferences++
 		return nil
-	}
-
-	libraryPath, err := resolveRuntimeLibraryWithOverride(runtimePath)
-	if err != nil {
-		return err
 	}
 
 	ort.SetSharedLibraryPath(libraryPath)
@@ -39,6 +47,7 @@ func AcquireEnvironmentWithPath(runtimePath string) error {
 
 	environmentInitialized = true
 	environmentReferences = 1
+	environmentLibraryPath = libraryPath
 	return nil
 }
 
@@ -72,8 +81,18 @@ func ReleaseEnvironment() error {
 	err := ort.DestroyEnvironment()
 	environmentInitialized = false
 	environmentReferences = 0
+	environmentLibraryPath = ""
 	if err != nil {
 		return fmt.Errorf("destroy ONNX Runtime environment: %w", err)
 	}
 	return nil
+}
+
+func sameRuntimeLibrary(left, right string) bool {
+	leftAbs, leftErr := filepath.Abs(left)
+	rightAbs, rightErr := filepath.Abs(right)
+	if leftErr != nil || rightErr != nil {
+		return filepath.Clean(left) == filepath.Clean(right)
+	}
+	return filepath.Clean(leftAbs) == filepath.Clean(rightAbs)
 }

@@ -58,7 +58,89 @@ func NewMelProcessor() *MelProcessor {
 // Do not add log1p/db/unit normalization here.
 // Experimental transforms belong only to ExtractMelSpectrogramMode and cmd/model_probe.
 func ExtractMelSpectrogram(path string) ([]float32, int, error) {
-	return ExtractMelSpectrogramMode(path, string(MelModeOfficial))
+	return ExtractMelSpectrogramWithContext(context.Background(), path)
+}
+
+type MelAnalysisWindow struct {
+	Start    time.Duration
+	Duration time.Duration
+}
+
+func ExtractMelSpectrogramWithContext(
+	ctx context.Context,
+	path string,
+) ([]float32, int, error) {
+	duration := time.Duration(0)
+	if durationMs, err := DecodeAudioDuration(ctx, path); err == nil && durationMs > 0 {
+		duration = time.Duration(durationMs) * time.Millisecond
+	}
+
+	windows := SelectMelAnalysisWindows(duration)
+	analysisLog.I(
+		"mel windows path=%q duration=%.2fs windows=%d",
+		path,
+		duration.Seconds(),
+		len(windows),
+	)
+	all := make([]float32, 0)
+	totalPatches := 0
+	for index, window := range windows {
+		frames, err := extractMelFramesWindow(
+			ctx,
+			path,
+			string(MelModeOfficial),
+			window.Start,
+			window.Duration,
+		)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
+			continue
+		}
+		patched, patches, err := makeMelPatches(frames)
+		if err != nil {
+			analysisLog.W(
+				"mel window skipped path=%q index=%d start=%.2fs duration=%.2fs err=%v",
+				path, index, window.Start.Seconds(), window.Duration.Seconds(), err,
+			)
+			continue
+		}
+		analysisLog.D(
+			"mel window ok path=%q index=%d start=%.2fs duration=%.2fs frames=%d patches=%d",
+			path, index, window.Start.Seconds(), window.Duration.Seconds(), len(frames)/EssentiaMelBands, patches,
+		)
+		all = append(all, patched...)
+		totalPatches += patches
+	}
+	if totalPatches == 0 {
+		return nil, 0, errors.New("too few mel frames")
+	}
+	analysisLog.I("mel ready path=%q patches=%d values=%d", path, totalPatches, len(all))
+	return all, totalPatches, nil
+}
+
+func SelectMelAnalysisWindows(total time.Duration) []MelAnalysisWindow {
+	const (
+		singleWindow = 45 * time.Second
+		segment      = 15 * time.Second
+	)
+	if total <= 0 {
+		return []MelAnalysisWindow{{Duration: singleWindow}}
+	}
+	if total <= singleWindow {
+		return []MelAnalysisWindow{{Duration: total}}
+	}
+	lastStart := total - segment
+	middleStart := total/2 - segment/2
+	if middleStart < 0 {
+		middleStart = 0
+	}
+	return []MelAnalysisWindow{
+		{Start: 0, Duration: segment},
+		{Start: middleStart, Duration: segment},
+		{Start: lastStart, Duration: segment},
+	}
 }
 
 func ExtractMelSpectrogramMode(path, mode string) ([]float32, int, error) {
@@ -66,15 +148,16 @@ func ExtractMelSpectrogramMode(path, mode string) ([]float32, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	return makeMelPatches(frames)
+}
+
+func makeMelPatches(frames []float32) ([]float32, int, error) {
 	frameCount := len(frames) / EssentiaMelBands
 	if frameCount < EssentiaPatchFrames {
 		return nil, 0, errors.New("too few mel frames")
 	}
-	patchHop := 62
+	const patchHop = 62
 	patches := 1 + (frameCount-EssentiaPatchFrames)/patchHop
-	if patches <= 0 {
-		return nil, 0, errors.New("too few mel frames")
-	}
 	flat := make([]float32, 0, patches*EssentiaMelBands*EssentiaPatchFrames)
 	for p := 0; p < patches; p++ {
 		startFrame := p * patchHop
@@ -83,11 +166,7 @@ func ExtractMelSpectrogramMode(path, mode string) ([]float32, int, error) {
 			break
 		}
 		chunk := frames[startFrame*EssentiaMelBands : endFrame*EssentiaMelBands]
-		for frame := 0; frame < EssentiaPatchFrames; frame++ {
-			for mel := 0; mel < EssentiaMelBands; mel++ {
-				flat = append(flat, chunk[frame*EssentiaMelBands+mel])
-			}
-		}
+		flat = append(flat, chunk...)
 	}
 	return flat, patches, nil
 }
@@ -104,6 +183,31 @@ func ExtractMelFramesMode(path, mode string) ([]float32, error) {
 	if mode == "" || mode == string(MelModeCurrent) {
 		mode = string(MelModeOfficial)
 	}
+	flat := make([]float32, 0, len(frames)*EssentiaMelBands)
+	for _, frame := range frames {
+		flat = append(flat, transformMelFrame(frame, mode)...)
+	}
+	if len(flat) == 0 {
+		return nil, errors.New("too few mel frames")
+	}
+	return flat, nil
+}
+
+func extractMelFramesWindow(
+	ctx context.Context,
+	path string,
+	mode string,
+	start time.Duration,
+	duration time.Duration,
+) ([]float32, error) {
+	resampled, err := ExtractResampledMonoWindowAt(ctx, path, start, duration)
+	if err != nil {
+		return nil, err
+	}
+	if len(resampled) < EssentiaFFTSize {
+		return nil, errors.New("too few samples for mel extraction")
+	}
+	frames := NewMelProcessor().ProcessEnergy(resampled)
 	flat := make([]float32, 0, len(frames)*EssentiaMelBands)
 	for _, frame := range frames {
 		flat = append(flat, transformMelFrame(frame, mode)...)
@@ -183,10 +287,19 @@ func ExtractMelEnergyFrames(path string) ([][]float32, error) {
 }
 
 func ExtractResampledMonoWindow(path string, dur time.Duration) ([]float64, error) {
+	return ExtractResampledMonoWindowAt(context.Background(), path, 0, dur)
+}
+
+func ExtractResampledMonoWindowAt(
+	ctx context.Context,
+	path string,
+	start time.Duration,
+	dur time.Duration,
+) ([]float64, error) {
 	cfg := DefaultFFmpegConfig()
-	cfg.Start = 0
+	cfg.Start = start
 	cfg.Duration = dur
-	raw, sr, _, err := DecodeMonoFloat32WithFFmpeg(context.Background(), path, cfg)
+	raw, sr, _, err := DecodeMonoFloat32WithFFmpeg(ctx, path, cfg)
 	if err != nil {
 		return nil, err
 	}

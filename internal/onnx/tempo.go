@@ -36,6 +36,10 @@ type TempoResult struct {
 	RawBPMMean float64
 	RawBPMStd  float64
 
+	RawConfidenceMean float64
+	RawConfidenceStd  float64
+	SuspiciousLock    bool
+
 	Reliable bool
 }
 
@@ -54,6 +58,7 @@ type tempoModelMeta struct {
 
 type TempoEngine struct {
 	mu           sync.Mutex
+	lifeMu       sync.RWMutex
 	session      *ort.DynamicSession[float32, float32]
 	inputName    string
 	outputName   string
@@ -100,24 +105,38 @@ func NewTempoEngine(runtimePath, modelsDir string) (*TempoEngine, error) {
 }
 
 func (e *TempoEngine) Ready() bool {
-	return e != nil && e.session != nil
+	if e == nil {
+		return false
+	}
+	e.lifeMu.RLock()
+	defer e.lifeMu.RUnlock()
+	return e.session != nil
 }
 
 func (e *TempoEngine) Close() error {
 	if e == nil {
 		return nil
 	}
-	if e.session != nil {
-		_ = e.session.Destroy()
+	e.lifeMu.Lock()
+	defer e.lifeMu.Unlock()
+	if e.session == nil {
+		return nil
 	}
+	_ = e.session.Destroy()
+	e.session = nil
 	return ReleaseEnvironment()
 }
 
 func (e *TempoEngine) AnalyzePath(ctx context.Context, path string) (TempoResult, error) {
-	if !e.Ready() {
+	if e == nil {
 		return TempoResult{}, errors.New("tempo engine not ready")
 	}
-	patches, err := analysis.ExtractTempoPatches(path)
+	e.lifeMu.RLock()
+	defer e.lifeMu.RUnlock()
+	if e.session == nil {
+		return TempoResult{}, errors.New("tempo engine not ready")
+	}
+	patches, err := analysis.ExtractTempoPatchesWithContext(ctx, path)
 	if err != nil {
 		return TempoResult{}, err
 	}
@@ -156,27 +175,20 @@ func (e *TempoEngine) AnalyzePath(ctx context.Context, path string) (TempoResult
 	}
 	result.AnalyzedAt = time.Now().Unix()
 
-	if len(localTempo) > 0 {
-		var sum float64
-		for _, value := range localTempo {
-			sum += value
-		}
-		result.RawBPMMean = sum / float64(len(localTempo))
-
-		var variance float64
-		for _, value := range localTempo {
-			delta := value - result.RawBPMMean
-			variance += delta * delta
-		}
-		result.RawBPMStd = math.Sqrt(variance / float64(len(localTempo)))
+	result.RawBPMMean, result.RawBPMStd = meanStd(localTempo)
+	result.RawConfidenceMean, result.RawConfidenceStd = meanStd(localProb)
+	result.SuspiciousLock = tempoLooksLocked(result)
+	result.Reliable = tempoResultReliable(result, len(patches)) && !result.SuspiciousLock
+	if result.RawBPMStd < 0.25 && result.Reliable {
+		tempoLog.D(
+			"stable low-variance tempo accepted bpm=%.2f conf=%.3f rawStd=%.4f confStd=%.4f suspiciousLock=%t",
+			result.BPM,
+			result.Confidence,
+			result.RawBPMStd,
+			result.RawConfidenceStd,
+			result.SuspiciousLock,
+		)
 	}
-
-	result.Reliable =
-		len(patches) >= 4 &&
-			result.BPM >= 45 &&
-			result.BPM <= 240 &&
-			result.Confidence >= 0.35 &&
-			result.RawBPMStd >= 0.25
 
 	if !result.Reliable {
 		tempoLog.W(
@@ -190,8 +202,39 @@ func (e *TempoEngine) AnalyzePath(ctx context.Context, path string) (TempoResult
 		)
 	}
 
-	tempoLog.I("analyzed path=%s bpm=%.2f perceived=%.2f conf=%.3f stability=%.3f patches=%d rawMean=%.2f rawStd=%.2f reliable=%t ms=%d", path, result.BPM, result.BPMPerceived, result.Confidence, result.Stability, len(patches), result.RawBPMMean, result.RawBPMStd, result.Reliable, time.Since(start).Milliseconds())
+	tempoLog.I("analyzed path=%s bpm=%.2f perceived=%.2f conf=%.3f stability=%.3f patches=%d rawMean=%.2f rawStd=%.2f confMean=%.3f confStd=%.4f suspiciousLock=%t reliable=%t ms=%d", path, result.BPM, result.BPMPerceived, result.Confidence, result.Stability, len(patches), result.RawBPMMean, result.RawBPMStd, result.RawConfidenceMean, result.RawConfidenceStd, result.SuspiciousLock, result.Reliable, time.Since(start).Milliseconds())
 	return result, nil
+}
+
+func meanStd(values []float64) (float64, float64) {
+	if len(values) == 0 {
+		return 0, 0
+	}
+	mean := 0.0
+	for _, value := range values {
+		mean += value
+	}
+	mean /= float64(len(values))
+	variance := 0.0
+	for _, value := range values {
+		delta := value - mean
+		variance += delta * delta
+	}
+	return mean, math.Sqrt(variance / float64(len(values)))
+}
+
+func tempoResultReliable(result TempoResult, patchCount int) bool {
+	return patchCount >= 4 &&
+		result.BPM >= 45 &&
+		result.BPM <= 240 &&
+		result.Confidence >= 0.35
+}
+
+func tempoLooksLocked(result TempoResult) bool {
+	return len(result.LocalBPM) >= 4 &&
+		result.RawBPMStd < 1e-6 &&
+		result.RawConfidenceStd < 1e-6 &&
+		result.Confidence >= 0.999
 }
 
 func tempoInputShapeCandidates() [][]int64 {

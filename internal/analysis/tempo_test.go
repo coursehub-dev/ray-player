@@ -1,6 +1,9 @@
 package analysis
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestNormalizePerceivedBPM(t *testing.T) {
 	cases := map[float64]float64{64: 128, 190: 95, 140: 140, 0: 0}
@@ -23,5 +26,44 @@ func TestTempoConfidenceMedianAndStability(t *testing.T) {
 	}
 	if got := TempoStability([]float64{128, 129, 64, 128}, 128); got < 0.75 {
 		t.Fatalf("expected stability >= 0.75, got %f", got)
+	}
+}
+
+func TestTempoCNNContractMatchesEssentiaDefaults(t *testing.T) {
+	if TempoSampleRate != 11025 || TempoFFTSize != 1024 || TempoHopSize != 512 {
+		t.Fatalf("unexpected frame contract sr=%d fft=%d hop=%d", TempoSampleRate, TempoFFTSize, TempoHopSize)
+	}
+	if TempoMelBands != 40 || TempoPatchFrames != 256 || TempoPatchHop != 128 {
+		t.Fatalf("unexpected patch contract bands=%d frames=%d hop=%d", TempoMelBands, TempoPatchFrames, TempoPatchHop)
+	}
+}
+
+func TestStandardizeTempoPatchesMatchesPerInferenceTensorScaling(t *testing.T) {
+	patches := [][]float32{{1, 2, 3, 4}, {10, 20, 30, 40}}
+	standardizeTempoPatches(patches)
+	for index, patch := range patches {
+		mean := 0.0
+		for _, value := range patch {
+			mean += float64(value)
+		}
+		mean /= float64(len(patch))
+		variance := 0.0
+		for _, value := range patch {
+			d := float64(value) - mean
+			variance += d * d
+		}
+		std := math.Sqrt(variance / float64(len(patch)))
+		if math.Abs(mean) > 1e-6 || math.Abs(std-1) > 1e-6 {
+			t.Fatalf("patch=%d standardized mean=%v std=%v values=%v", index, mean, std, patch)
+		}
+	}
+}
+
+func TestSlaneyMelRoundTrip(t *testing.T) {
+	for _, hz := range []float64{20, 440, 1000, 2500, 5000} {
+		got := slaneyMelToHz(hzToSlaneyMel(hz))
+		if math.Abs(got-hz) > 1e-6*math.Max(1, hz) {
+			t.Fatalf("round trip hz=%v got=%v", hz, got)
+		}
 	}
 }

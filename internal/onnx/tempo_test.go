@@ -34,3 +34,45 @@ func TestTransposeTempoPatchKeepsLength(t *testing.T) {
 		t.Fatalf("transpose length=%d want %d", len(out), len(in))
 	}
 }
+
+func TestTempoReliableAllowsStableHighConfidenceTrack(t *testing.T) {
+	result := TempoResult{
+		BPM:              115,
+		Confidence:       0.92,
+		RawBPMStd:        0,
+		RawConfidenceStd: 0,
+	}
+	if !tempoResultReliable(result, 57) {
+		t.Fatal("stable tempo must not be rejected only because raw BPM std is zero")
+	}
+}
+
+func TestTempoReliableRejectsLowConfidence(t *testing.T) {
+	result := TempoResult{
+		BPM:        115,
+		Confidence: 0.20,
+		RawBPMStd:  12,
+	}
+	if tempoResultReliable(result, 57) {
+		t.Fatal("low-confidence tempo must be rejected")
+	}
+}
+
+func TestTempoLooksLockedRejectsExactHighConfidenceLock(t *testing.T) {
+	result := TempoResult{
+		BPM:              115,
+		Confidence:       1,
+		LocalBPM:         []float64{115, 115, 115, 115},
+		RawBPMStd:        0,
+		RawConfidenceStd: 0,
+	}
+	if !tempoLooksLocked(result) {
+		t.Fatal("expected suspicious lock diagnostic")
+	}
+	if !tempoResultReliable(result, len(result.LocalBPM)) {
+		t.Fatal("base reliability should remain high before the lock guard")
+	}
+	if reliable := tempoResultReliable(result, len(result.LocalBPM)) && !tempoLooksLocked(result); reliable {
+		t.Fatal("exact high-confidence lock must be rejected by the final guard")
+	}
+}

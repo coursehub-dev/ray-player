@@ -5,6 +5,8 @@ import (
 	"os"
 	"runtime/debug"
 
+	"ray-player1/internal/logx"
+
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -17,6 +19,12 @@ var assets embed.FS
 
 func main() {
 	debug.SetGCPercent(200)
+	if path, err := logx.ConfigureFile(""); err != nil {
+		appLog.W("file logging disabled: %v", err)
+	} else {
+		defer func() { _ = logx.CloseFile() }()
+		appLog.I("file logging enabled path=%q", path)
+	}
 	app := NewApp()
 
 	err := wails.Run(&options.App{
