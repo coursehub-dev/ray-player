@@ -19,6 +19,7 @@ import (
 	"ray-player1/internal/appstate"
 	"ray-player1/internal/audio"
 	"ray-player1/internal/db"
+	"ray-player1/internal/deps"
 	"ray-player1/internal/emoflow"
 	"ray-player1/internal/events"
 	"ray-player1/internal/externalmedia"
@@ -234,8 +235,7 @@ func NewApp() *App {
 		appLog.W("MiniLM model bundle unavailable: %v", miniLMDirErr)
 		miniLMDir = ""
 	}
-	analysis.SetFFmpegPath(appSettings.FFmpegPath)
-	analysis.SetFFprobePath(appSettings.FFprobePath)
+	applyMediaToolPaths(appSettings.FFmpegPath, appSettings.FFprobePath)
 	if miniLMDir != "" {
 		if eng, initErr := onnx.New(runtimePath, miniLMDir); initErr == nil {
 			engine = eng
@@ -936,12 +936,41 @@ func (a *App) TestMiniLM(payload SettingsPayload) MiniLMTestResult {
 }
 
 func (a *App) TestFFmpeg(path string) (string, error) {
-	path = strings.TrimSpace(path)
-	line, err := audio.CheckFFmpeg(path)
+	ffmpeg, ffprobe, err := deps.ResolveFFmpegTools(path, "")
 	if err != nil {
 		return "", err
 	}
-	return line, nil
+	line, err := audio.CheckFFmpeg(ffmpeg)
+	if err != nil {
+		return "", err
+	}
+	probeLine, err := audio.CheckFFmpeg(ffprobe)
+	if err != nil {
+		return "", fmt.Errorf("ffprobe unavailable: %w", err)
+	}
+	return line + " | " + probeLine, nil
+}
+
+func (a *App) DoctorCheck(component string, payload SettingsPayload) deps.Check {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return deps.CheckComponent(ctx, component, doctorSettings(payload))
+}
+
+func (a *App) DoctorRepair(component string, payload SettingsPayload) deps.RepairResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	defer cancel()
+	return deps.RepairComponent(ctx, component, doctorSettings(payload))
+}
+
+func doctorSettings(payload SettingsPayload) deps.Settings {
+	return deps.Settings{
+		ONNXRuntimePath:  strings.TrimSpace(payload.OnnxRuntimePath),
+		MiniLMModelDir:   strings.TrimSpace(payload.MiniLMModelDir),
+		EssentiaModelDir: strings.TrimSpace(payload.EssentiaModelDir),
+		FFmpegPath:       strings.TrimSpace(payload.FFmpegPath),
+		FFprobePath:      strings.TrimSpace(payload.FFprobePath),
+	}
 }
 
 func (a *App) TestEssentia(payload SettingsPayload) EssentiaTestResult {
@@ -1038,11 +1067,25 @@ func (a *App) SaveSettings(payload SettingsPayload) (BootstrapPayload, error) {
 	committed = true
 	closeModelEngines(oldText, oldEssentia, oldTempo)
 
-	analysis.SetFFmpegPath(payload.FFmpegPath)
-	analysis.SetFFprobePath(payload.FFprobePath)
+	applyMediaToolPaths(payload.FFmpegPath, payload.FFprobePath)
 	a.pushSnapshot()
 	a.emitEmoFlowUpdate()
 	return a.Bootstrap(), nil
+}
+
+func applyMediaToolPaths(configuredFFmpeg, configuredFFprobe string) {
+	ffmpegPath := strings.TrimSpace(configuredFFmpeg)
+	ffprobePath := strings.TrimSpace(configuredFFprobe)
+	if resolvedFFmpeg, resolvedFFprobe, err := deps.ResolveFFmpegTools(ffmpegPath, ffprobePath); err == nil {
+		ffmpegPath = resolvedFFmpeg
+		ffprobePath = resolvedFFprobe
+	} else {
+		appLog.W("ffmpeg tools unresolved configuredFFmpeg=%q configuredFFprobe=%q err=%v", configuredFFmpeg, configuredFFprobe, err)
+	}
+	analysis.SetFFmpegPath(ffmpegPath)
+	analysis.SetFFprobePath(ffprobePath)
+	audio.SetFFmpegPath(ffmpegPath)
+	audio.SetFFprobePath(ffprobePath)
 }
 
 func prepareModelEngines(
@@ -1118,6 +1161,14 @@ func (a *App) DebugReindexLibrary() DebugReindexResult {
 	a.reindexRunning = true
 	a.reindexMu.Unlock()
 
+	a.reclusterMu.Lock()
+	if a.reclusterTimer != nil {
+		a.reclusterTimer.Stop()
+		a.reclusterTimer = nil
+	}
+	a.reclusterPending = false
+	a.reclusterMu.Unlock()
+
 	tracks := a.library.AllTracks()
 	result := DebugReindexResult{Started: true, Busy: true, Total: len(tracks), Message: fmt.Sprintf("reindex queued: %d tracks", len(tracks))}
 	appLog.I("debug reindex requested total=%d ctxNil=%t", len(tracks), a.ctx == nil)
@@ -1155,6 +1206,10 @@ func (a *App) DebugReindexLibrary() DebugReindexResult {
 			}
 			return
 		}
+		// RebuildStale emits one analyzed event per track. Re-clustering the
+		// partially refreshed library on every debounce made cluster IDs churn
+		// during reindex. Keep the batch marked busy and cluster exactly once
+		// from the coherent final set before the deferred unlock exposes idle.
 		a.RunReclusterSingleflight()
 		a.pushSnapshot()
 		if a.ctx != nil {
@@ -2918,6 +2973,9 @@ func (a *App) ScheduleRecluster() {
 	if stopping {
 		return
 	}
+	if a.isReindexRunning() {
+		return
+	}
 
 	a.reclusterMu.Lock()
 	defer a.reclusterMu.Unlock()
@@ -2932,6 +2990,13 @@ func (a *App) ScheduleRecluster() {
 			a.RunReclusterSingleflight()
 		})
 	})
+}
+
+func (a *App) isReindexRunning() bool {
+	a.reindexMu.Lock()
+	running := a.reindexRunning
+	a.reindexMu.Unlock()
+	return running
 }
 
 func (a *App) RunReclusterSingleflight() {

@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -11,20 +12,96 @@ func TestDefaultMelModeIsOfficial(t *testing.T) {
 	}
 }
 
-func TestApplyMelModeOfficialIsIdentity(t *testing.T) {
-	in := []float32{0, 0.5, 2, 10, 50}
+func TestApplyMelModeOfficialMatchesMusiCNNLogCompression(t *testing.T) {
+	in := []float32{0, 0.0001, 0.001}
 	out := transformMelFrame(in, string(MelModeOfficial))
 	if len(out) != len(in) {
 		t.Fatalf("len mismatch: got %d want %d", len(out), len(in))
 	}
-	for i := range in {
-		if out[i] != in[i] {
-			t.Fatalf("official mode changed value at %d: got %v want %v", i, out[i], in[i])
+	want := []float64{0, math.Log10(2), math.Log10(11)}
+	for i := range out {
+		if math.Abs(float64(out[i])-want[i]) > 1e-6 {
+			t.Fatalf("official[%d]=%v want=%v", i, out[i], want[i])
 		}
 	}
 	out[0] = 999
 	if in[0] == 999 {
 		t.Fatal("apply must return a copy, not alias input")
+	}
+}
+
+func TestSlaneyMelRoundTrip(t *testing.T) {
+	if got := hzToSlaneyMel(1000); math.Abs(got-15) > 1e-9 {
+		t.Fatalf("hzToSlaneyMel(1000)=%v want=15", got)
+	}
+	for _, hz := range []float64{0, 100, 1000, 4000, 8000} {
+		got := slaneyMelToHz(hzToSlaneyMel(hz))
+		if math.Abs(got-hz) > 1e-6*math.Max(1, hz) {
+			t.Fatalf("Slaney round trip %v -> %v", hz, got)
+		}
+	}
+}
+
+func TestMusiCNNHannWindowIsSymmetricAndNotAreaNormalized(t *testing.T) {
+	p := NewMelProcessor()
+	if len(p.hannWin) != EssentiaFFTSize {
+		t.Fatalf("hann size=%d want=%d", len(p.hannWin), EssentiaFFTSize)
+	}
+	sum := 0.0
+	for i, value := range p.hannWin {
+		sum += value
+		if math.Abs(value-p.hannWin[len(p.hannWin)-1-i]) > 1e-12 {
+			t.Fatalf("hann window is not symmetric at %d", i)
+		}
+	}
+	want := float64(EssentiaFFTSize-1) / 2
+	if math.Abs(sum-want) > 1e-9 {
+		t.Fatalf("hann sum=%v want=%v; window must match Essentia normalized=false", sum, want)
+	}
+}
+
+func TestApplyMelFiltersEnergyUsesPowerSpectrum(t *testing.T) {
+	got := applyMelFiltersEnergy([]float64{2}, [][]float64{{0.5}})
+	if len(got) != 1 || math.Abs(float64(got[0])-2) > 1e-9 {
+		t.Fatalf("power energy=%v want=2", got)
+	}
+}
+
+func TestMusiCNNFilterbankIsFiniteAndPopulated(t *testing.T) {
+	filters := buildMelFilterbank(EssentiaMelBands, EssentiaFFTSize, EssentiaSampleRate)
+	if len(filters) != EssentiaMelBands {
+		t.Fatalf("filters=%d", len(filters))
+	}
+	for band, weights := range filters {
+		nonZero := 0
+		for _, weight := range weights {
+			if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 {
+				t.Fatalf("band=%d invalid weight=%v", band, weight)
+			}
+			if weight > 0 {
+				nonZero++
+			}
+		}
+		if nonZero == 0 {
+			t.Fatalf("band=%d is empty", band)
+		}
+	}
+}
+
+func TestMusiCNNUnitTriangleFiltersHaveApproximatelyUnitArea(t *testing.T) {
+	filters := buildMelFilterbank(EssentiaMelBands, EssentiaFFTSize, EssentiaSampleRate)
+	binHz := float64(EssentiaSampleRate) / float64(EssentiaFFTSize)
+	for band, weights := range filters {
+		area := 0.0
+		for _, weight := range weights {
+			area += weight * binHz
+		}
+		// The triangles are sampled at FFT-bin centres, so discretization is
+		// coarsest in the narrow low-frequency bands. We only need to catch a
+		// regression back to unit-max / unnormalized triangles here.
+		if area < 0.55 || area > 1.45 {
+			t.Fatalf("band=%d unit_tri area=%v", band, area)
+		}
 	}
 }
 

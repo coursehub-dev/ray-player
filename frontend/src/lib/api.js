@@ -196,6 +196,7 @@ export const api = {
 					miniLMModelDir: "",
 					essentiaModelDir: "",
 					ffmpegPath: "ffmpeg",
+					ffprobePath: "ffprobe",
 					storagePath: "",
 					repeatRay: true,
 					extendRay: false,
@@ -269,6 +270,29 @@ export const api = {
 					busy: false,
 					total: 0,
 					message: "Wails unavailable",
+				}),
+	doctorCheck: (component, payload) =>
+		hasWails()
+			? appCall("DoctorCheck", component, payload)
+			: Promise.resolve({
+					id: component,
+					title: component,
+					status: "blocked",
+					message: "Wails runtime unavailable",
+					repairable: false,
+				}),
+	doctorRepair: (component, payload) =>
+		hasWails()
+			? appCall("DoctorRepair", component, payload)
+			: Promise.resolve({
+					check: {
+						id: component,
+						title: component,
+						status: "blocked",
+						message: "Wails runtime unavailable",
+						repairable: false,
+					},
+					patch: {},
 				}),
 	rayAudit: (trackId, mode, limit = 20) =>
 		hasWails()

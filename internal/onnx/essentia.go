@@ -281,7 +281,8 @@ func NewEssentiaEngine(runtimePath, modelsDir string) (*EssentiaEngine, error) {
 			if contractErr != nil {
 				essentiaLog.I("discogs contract validation failed: %v", contractErr)
 			} else {
-				discogsModel, dErr := NewDynamicMultiOutputFloatModel(
+				discogsModel, dErr := NewDynamicMultiOutputFloatModelWithPath(
+					runtimePath,
 					"discogs-effnet",
 					discogsPath,
 					ioNames.Input,
@@ -534,8 +535,9 @@ func (e *EssentiaEngine) loadGenre(modelsDir string) {
 			essentiaLog.I("genre label check index=%d is outside labels count=%d", index, len(e.genreClasses))
 			continue
 		}
-		if !strings.HasPrefix(e.genreClasses[index], prefix) {
-			essentiaLog.I("genre labels mismatch index=%d got=%q expectedPrefix=%q", index, e.genreClasses[index], prefix)
+		clean := cleanGenreLabel(e.genreClasses[index])
+		if !strings.HasPrefix(clean, prefix) {
+			essentiaLog.I("genre labels mismatch index=%d got=%q clean=%q expectedPrefix=%q", index, e.genreClasses[index], clean, prefix)
 		}
 	}
 }
@@ -885,9 +887,10 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		result.GenreLabel = formatGenreTags(result.GenreTags)
 		finalizeGenreResult(&result)
 
+		patchPredictions := flattenPatchPredictions(discogsResult.PatchPredictions)
 		quality, qualityErr := inspectGenreOutput(
-			discogsResult.MeanPredictions,
-			1,
+			patchPredictions,
+			len(discogsResult.PatchPredictions),
 			len(e.genreClasses),
 		)
 		if qualityErr != nil {
@@ -1424,7 +1427,7 @@ func buildGenreTagsForUI(groups []GenreGroupCandidate, limit int) []GenreTag {
 				continue
 			}
 		}
-		tags = append(tags, GenreTag{Label: label, Detail: g.BestSubLabel, Score: float64(g.Score), Rank: len(tags) + 1, Support: g.Support})
+		tags = append(tags, GenreTag{Label: label, Detail: genreDetailForUI(g), Score: float64(g.Score), Rank: len(tags) + 1, Support: g.Support})
 	}
 	return tags
 }
@@ -1623,6 +1626,35 @@ func parentGenre(label string) string {
 		return ""
 	}
 	return parent
+}
+
+func genreDetailForUI(g GenreGroupCandidate) string {
+	detail := cleanGenreLabel(g.BestSubLabel)
+	if detail == "" || g.Support < 2 || g.BestSubScore < 0.16 {
+		return ""
+	}
+	switch detail {
+	case "Rock / Black Metal", "Rock / Funeral Doom Metal", "Hip Hop / DJ Battle Tool":
+		if g.BestSubScore < 0.24 {
+			return ""
+		}
+	}
+	return detail
+}
+
+func flattenPatchPredictions(rows [][]float32) []float32 {
+	if len(rows) == 0 {
+		return nil
+	}
+	total := 0
+	for _, row := range rows {
+		total += len(row)
+	}
+	out := make([]float32, 0, total)
+	for _, row := range rows {
+		out = append(out, row...)
+	}
+	return out
 }
 
 func averageHeadPredictions(data []float32, validRows int) []float32 {

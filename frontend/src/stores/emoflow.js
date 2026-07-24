@@ -151,8 +151,12 @@ export function mergeEmoFlowState(state, nextState) {
 				palette: normalized.current.palette || palette,
 			}
 		: state?.current || null;
-	const hasPrevious = Boolean(normalized) && Object.prototype.hasOwnProperty.call(normalized, "previous");
-	const hasNext = Boolean(normalized) && Object.prototype.hasOwnProperty.call(normalized, "next");
+	const hasPrevious =
+		Boolean(normalized) &&
+		Object.prototype.hasOwnProperty.call(normalized, "previous");
+	const hasNext =
+		Boolean(normalized) &&
+		Object.prototype.hasOwnProperty.call(normalized, "next");
 	merged.previous = normalized?.previous
 		? {
 				...(sameCurrentTrack ? state?.previous || {} : {}),

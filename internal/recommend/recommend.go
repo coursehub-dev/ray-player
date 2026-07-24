@@ -968,16 +968,7 @@ func (s *Service) Recluster(tracks []library.Track) {
 		before[track.ID] = track.ClusterID
 	}
 	recommendLog.I("recluster start tracks=%d k=%d", len(tracks), k)
-	centroids := make([][]float32, 0, k)
-	for _, track := range tracks {
-		if len(track.Embedding) != modelcontract.DiscogsEmbeddingSize {
-			continue
-		}
-		centroids = append(centroids, append([]float32{}, track.Embedding...))
-		if len(centroids) == k {
-			break
-		}
-	}
+	centroids := initialClusterCentroids(tracks, k)
 	if len(centroids) == 0 {
 		for i := range tracks {
 			tracks[i].ClusterID = i % k
@@ -1035,6 +1026,91 @@ func (s *Service) Recluster(tracks []library.Track) {
 		}
 	}
 	recommendLog.I("recluster done tracks=%d clusters=%d changed=%d ms=%d", len(tracks), len(centroids), changed, time.Since(start).Milliseconds())
+}
+
+func initialClusterCentroids(tracks []library.Track, k int) [][]float32 {
+	if k <= 0 {
+		return nil
+	}
+	type candidate struct {
+		id        string
+		embedding []float32
+	}
+	candidates := make([]candidate, 0, len(tracks))
+	for _, track := range tracks {
+		if len(track.Embedding) != modelcontract.DiscogsEmbeddingSize {
+			continue
+		}
+		id := strings.TrimSpace(track.ID)
+		if id == "" {
+			id = strings.TrimSpace(track.Path)
+		}
+		candidates = append(candidates, candidate{
+			id:        id,
+			embedding: track.Embedding,
+		})
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].id != candidates[j].id {
+			return candidates[i].id < candidates[j].id
+		}
+		return embeddingLexLess(candidates[i].embedding, candidates[j].embedding)
+	})
+	if k > len(candidates) {
+		k = len(candidates)
+	}
+
+	centroids := make([][]float32, 0, k)
+	selected := make([]bool, len(candidates))
+	selected[0] = true
+	centroids = append(centroids, append([]float32{}, candidates[0].embedding...))
+
+	// Deterministic farthest-first seeding avoids the old "first k tracks" bias.
+	// The result is stable for the same library even if DB/query order changes, while
+	// still spreading initial seeds across the embedding space.
+	for len(centroids) < k {
+		bestIndex := -1
+		bestDistance := -1.0
+		for i := range candidates {
+			if selected[i] {
+				continue
+			}
+			nearestDistance := math.Inf(1)
+			for _, centroid := range centroids {
+				distance := 1 - math.Max(-1, math.Min(1, vectorSim(candidates[i].embedding, centroid)))
+				if distance < nearestDistance {
+					nearestDistance = distance
+				}
+			}
+			if nearestDistance > bestDistance+1e-12 {
+				bestDistance = nearestDistance
+				bestIndex = i
+			}
+		}
+		if bestIndex < 0 {
+			break
+		}
+		selected[bestIndex] = true
+		centroids = append(centroids, append([]float32{}, candidates[bestIndex].embedding...))
+	}
+	return centroids
+}
+
+func embeddingLexLess(a, b []float32) bool {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] == b[i] {
+			continue
+		}
+		return a[i] < b[i]
+	}
+	return len(a) < len(b)
 }
 
 func (s *Service) BuildRay(seed library.Track, tracks []library.Track, currentRayID string) []rays.QueueItem {

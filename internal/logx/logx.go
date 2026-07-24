@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"ray-player1/internal/appdirs"
 )
 
 type Level int
@@ -47,11 +49,11 @@ func ConfigureFile(path string) (string, error) {
 		path = strings.TrimSpace(os.Getenv("RAY_LOG_FILE"))
 	}
 	if path == "" {
-		base, err := os.UserConfigDir()
+		base, err := appdirs.DefaultRoot()
 		if err != nil {
-			return "", fmt.Errorf("resolve user config dir: %w", err)
+			return "", err
 		}
-		path = filepath.Join(base, "ray-player1", "logs", "ray-player.log")
+		path = filepath.Join(base, "logs", "ray-player.log")
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {

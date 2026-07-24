@@ -58,12 +58,3 @@ func TestStandardizeTempoPatchesMatchesPerInferenceTensorScaling(t *testing.T) {
 		}
 	}
 }
-
-func TestSlaneyMelRoundTrip(t *testing.T) {
-	for _, hz := range []float64{20, 440, 1000, 2500, 5000} {
-		got := slaneyMelToHz(hzToSlaneyMel(hz))
-		if math.Abs(got-hz) > 1e-6*math.Max(1, hz) {
-			t.Fatalf("round trip hz=%v got=%v", hz, got)
-		}
-	}
-}

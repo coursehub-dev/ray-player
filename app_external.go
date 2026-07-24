@@ -13,6 +13,8 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"ray-player1/internal/audio"
+	"ray-player1/internal/deps"
 	"ray-player1/internal/externalmedia"
 )
 
@@ -36,6 +38,15 @@ func (a *App) GetExternalMediaSettings() externalmedia.Settings {
 	}
 	if value, err := a.store.GetMeta(metaFFmpegPath); err == nil {
 		settings.FFmpegPath = value
+	}
+
+	if resolved, _, err := deps.ResolveFFmpegTools(settings.FFmpegPath, ""); err == nil {
+		settings.FFmpegPath = resolved
+	} else {
+		// The external-media setting may still contain the historical "ffmpeg"
+		// command name. Reuse the process-wide effective path so a Doctor-managed
+		// binary works here as well when ffmpeg is absent from PATH.
+		settings.FFmpegPath = audio.FFmpegPath()
 	}
 
 	return settings

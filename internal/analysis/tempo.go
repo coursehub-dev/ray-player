@@ -117,32 +117,6 @@ func buildTempoCNNMelFilterbank() [][]float64 {
 	return filters
 }
 
-func hzToSlaneyMel(hz float64) float64 {
-	const (
-		freqStep  = 200.0 / 3.0
-		minLogHz  = 1000.0
-		minLogMel = minLogHz / freqStep
-		logStep   = 0.06875177742094912
-	)
-	if hz < minLogHz {
-		return hz / freqStep
-	}
-	return minLogMel + math.Log(hz/minLogHz)/logStep
-}
-
-func slaneyMelToHz(mel float64) float64 {
-	const (
-		freqStep  = 200.0 / 3.0
-		minLogHz  = 1000.0
-		minLogMel = minLogHz / freqStep
-		logStep   = 0.06875177742094912
-	)
-	if mel < minLogMel {
-		return mel * freqStep
-	}
-	return minLogHz * math.Exp(logStep*(mel-minLogMel))
-}
-
 func standardizeTempoPatches(patches [][]float32) {
 	for _, patch := range patches {
 		if len(patch) == 0 {

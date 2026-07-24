@@ -53,10 +53,10 @@ func NewMelProcessor() *MelProcessor {
 }
 
 // IMPORTANT:
-// This path must remain compatible with the official Essentia/Python preprocessing
-// verified experimentally for discogs-effnet-bs64-1 and classifier heads.
-// Do not add log1p/db/unit normalization here.
-// Experimental transforms belong only to ExtractMelSpectrogramMode and cmd/model_probe.
+// MusiCNN/EffNet Discogs models are trained on Essentia's TensorflowInputMusiCNN
+// frontend: 16 kHz, 512/256 STFT, 96 Slaney mel bands, linear triangles with
+// unit-triangle normalization, power spectrum, then log10(1 + 10000 * energy).
+// Experimental transforms belong only to ExtractMelSpectrogramMode/model probes.
 func ExtractMelSpectrogram(path string) ([]float32, int, error) {
 	return ExtractMelSpectrogramWithContext(context.Background(), path)
 }
@@ -222,9 +222,13 @@ func transformMelFrame(frame []float32, mode string) []float32 {
 	out := make([]float32, len(frame))
 	switch mode {
 	case string(MelModeOfficial):
-		copy(out, frame)
+		for i, v := range frame {
+			out[i] = float32(math.Log10(1.0 + 10000.0*math.Max(0, float64(v))))
+		}
 	case string(MelModeCurrent):
-		copy(out, frame)
+		for i, v := range frame {
+			out[i] = float32(math.Log10(1.0 + 10000.0*math.Max(0, float64(v))))
+		}
 	case string(MelModeLog1P), "essentia-like":
 		for i, v := range frame {
 			out[i] = float32(math.Log1p(float64(v)))
@@ -320,10 +324,7 @@ func (p *MelProcessor) Process(samples []float64) [][]float32 {
 	}
 	out := make([][]float32, len(energy))
 	for i := range energy {
-		out[i] = make([]float32, len(energy[i]))
-		for j, v := range energy[i] {
-			out[i][j] = float32(math.Log1p(float64(v)))
-		}
+		out[i] = transformMelFrame(energy[i], string(MelModeOfficial))
 	}
 	return out
 }
@@ -395,7 +396,7 @@ func fftMagnitudes(frame []float64) []float64 {
 	for i := 0; i < half; i++ {
 		re := real(spec[i])
 		im := imag(spec[i])
-		out[i] = math.Sqrt(re*re+im*im) + 1e-9
+		out[i] = math.Sqrt(re*re + im*im)
 	}
 	return out
 }
@@ -417,7 +418,9 @@ func applyMelFiltersEnergy(spec []float64, filters [][]float64) []float32 {
 	for m := range filters {
 		var energy float64
 		for i := range spec {
-			energy += spec[i] * filters[m][i]
+			// Essentia MelBands defaults to type=power: the filterbank consumes
+			// squared magnitude even though Spectrum itself returns magnitude.
+			energy += spec[i] * spec[i] * filters[m][i]
 		}
 		out[m] = float32(energy)
 	}
@@ -426,39 +429,65 @@ func applyMelFiltersEnergy(spec []float64, filters [][]float64) []float32 {
 
 func buildMelFilterbank(melBands, fftSize, sampleRate int) [][]float64 {
 	half := fftSize/2 + 1
-	lowMel := hzToMel(0)
-	highMel := hzToMel(float64(sampleRate) / 2)
+	lowMel := hzToSlaneyMel(0)
+	highMel := hzToSlaneyMel(float64(sampleRate) / 2)
 	melPoints := make([]float64, melBands+2)
+	hzPoints := make([]float64, melBands+2)
 	for i := range melPoints {
 		melPoints[i] = lowMel + (highMel-lowMel)*float64(i)/float64(len(melPoints)-1)
-	}
-	bins := make([]int, len(melPoints))
-	for i, mel := range melPoints {
-		hz := melToHz(mel)
-		bins[i] = int(math.Floor((float64(fftSize) + 1) * hz / float64(sampleRate)))
-		if bins[i] > half-1 {
-			bins[i] = half - 1
-		}
+		hzPoints[i] = slaneyMelToHz(melPoints[i])
 	}
 	filters := make([][]float64, melBands)
-	for m := 1; m <= melBands; m++ {
-		filters[m-1] = make([]float64, half)
-		left, center, right := bins[m-1], bins[m], bins[m+1]
-		if center <= left {
-			center = left + 1
+	for m := 0; m < melBands; m++ {
+		filters[m] = make([]float64, half)
+		left := hzPoints[m]
+		center := hzPoints[m+1]
+		right := hzPoints[m+2]
+		if !(left < center && center < right) {
+			continue
 		}
-		if right <= center {
-			right = center + 1
-		}
-		for k := left; k < center && k < half; k++ {
-			filters[m-1][k] = float64(k-left) / float64(center-left)
-		}
-		for k := center; k < right && k < half; k++ {
-			filters[m-1][k] = float64(right-k) / float64(right-center)
+		// Essentia weighting=linear: interpolate triangle weights in Hz.
+		// normalize=unit_tri: normalize continuous triangle area by bandwidth.
+		normalize := 2.0 / (right - left)
+		for k := 0; k < half; k++ {
+			hz := float64(k) * float64(sampleRate) / float64(fftSize)
+			var weight float64
+			switch {
+			case hz >= left && hz < center:
+				weight = (hz - left) / (center - left)
+			case hz >= center && hz <= right:
+				weight = (right - hz) / (right - center)
+			}
+			if weight > 0 {
+				filters[m][k] = weight * normalize
+			}
 		}
 	}
 	return filters
 }
 
-func hzToMel(hz float64) float64  { return 2595 * math.Log10(1+hz/700) }
-func melToHz(mel float64) float64 { return 700 * (math.Pow(10, mel/2595) - 1) }
+func hzToSlaneyMel(hz float64) float64 {
+	const (
+		linearHzPerMel = 200.0 / 3.0
+		minLogHz       = 1000.0
+		minLogMel      = minLogHz / linearHzPerMel
+		logStep        = 0.06875177742094912 // ln(6.4) / 27
+	)
+	if hz < minLogHz {
+		return hz / linearHzPerMel
+	}
+	return minLogMel + math.Log(hz/minLogHz)/logStep
+}
+
+func slaneyMelToHz(mel float64) float64 {
+	const (
+		linearHzPerMel = 200.0 / 3.0
+		minLogHz       = 1000.0
+		minLogMel      = minLogHz / linearHzPerMel
+		logStep        = 0.06875177742094912 // ln(6.4) / 27
+	)
+	if mel < minLogMel {
+		return mel * linearHzPerMel
+	}
+	return minLogHz * math.Exp(logStep*(mel-minLogMel))
+}

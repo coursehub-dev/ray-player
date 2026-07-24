@@ -1,38 +1,23 @@
 package main
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"ray-player1/internal/appdirs"
+	runtimeassets "ray-player1/internal/deps"
 	rayonnx "ray-player1/internal/onnx"
 )
 
-const (
-	onnxRuntimeVersion = "1.26.0"
-	miniLMRepository   = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-	maxDownloadBytes   = int64(2 << 30)
-)
-
-type runtimeAsset struct {
-	Archive string
-	Member  string
-	Library string
-	Zip     bool
-}
+const maxDownloadBytes = int64(2 << 30)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -73,13 +58,12 @@ func usage() {
 
 func checkDependencies() error {
 	var failures []string
-	for _, name := range []string{"ffmpeg", "ffprobe"} {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			failures = append(failures, name+" not found in PATH")
-			continue
-		}
-		fmt.Printf("ok %-12s %s\n", name, path)
+	ffmpegPath, ffprobePath, ffmpegErr := runtimeassets.ResolveFFmpegTools("", "")
+	if ffmpegErr != nil {
+		failures = append(failures, ffmpegErr.Error())
+	} else {
+		fmt.Printf("ok %-12s %s\n", "ffmpeg", ffmpegPath)
+		fmt.Printf("ok %-12s %s\n", "ffprobe", ffprobePath)
 	}
 
 	runtimePath, runtimeErr := rayonnx.ResolveRuntimeLibrary()
@@ -143,118 +127,37 @@ func ffmpegCommand(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if ffmpegReady() {
-		fmt.Println("ffmpeg and ffprobe are available")
+	if ffmpeg, ffprobe, err := runtimeassets.ResolveFFmpegTools("", ""); err == nil {
+		fmt.Println("ffmpeg and ffprobe are available:", ffmpeg, ffprobe)
 		return nil
 	}
 	if !*install {
 		return errors.New("ffmpeg/ffprobe not found; run `just deps-ffmpeg`")
 	}
-	if err := installFFmpeg(ctx); err != nil {
+	ffmpeg, ffprobe, err := runtimeassets.EnsureFFmpeg(ctx)
+	if err != nil {
 		return err
 	}
-	if !ffmpegReady() {
-		return errors.New("ffmpeg install command completed, but ffmpeg/ffprobe are still not visible in PATH; restart the shell and run `just deps-check`")
-	}
-	fmt.Println("ffmpeg and ffprobe installed")
-	return nil
-}
-
-func ffmpegReady() bool {
-	_, ffmpegErr := exec.LookPath("ffmpeg")
-	_, ffprobeErr := exec.LookPath("ffprobe")
-	return ffmpegErr == nil && ffprobeErr == nil
-}
-
-func installFFmpeg(ctx context.Context) error {
-	var command []string
-	switch runtime.GOOS {
-	case "darwin":
-		if _, err := exec.LookPath("brew"); err != nil {
-			return errors.New("Homebrew not found; install Homebrew or ffmpeg manually")
-		}
-		command = []string{"brew", "install", "ffmpeg"}
-	case "windows":
-		if _, err := exec.LookPath("winget"); err != nil {
-			return errors.New("winget not found; install ffmpeg manually and add it to PATH")
-		}
-		command = []string{"winget", "install", "--id", "Gyan.FFmpeg", "--exact", "--accept-package-agreements", "--accept-source-agreements"}
-	case "linux":
-		command = linuxInstallCommand()
-		if len(command) == 0 {
-			return errors.New("no supported package manager found; install ffmpeg and ffprobe manually")
-		}
-	default:
-		return fmt.Errorf("automatic ffmpeg installation is unsupported on %s", runtime.GOOS)
-	}
-	fmt.Println("running:", strings.Join(command, " "))
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("install ffmpeg: %w", err)
-	}
-	return nil
-}
-
-func linuxInstallCommand() []string {
-	prefix := []string{}
-	if os.Geteuid() != 0 {
-		if _, err := exec.LookPath("sudo"); err != nil {
-			return nil
-		}
-		prefix = []string{"sudo"}
-	}
-	if _, err := exec.LookPath("apt-get"); err == nil {
-		command := "apt-get update && apt-get install -y ffmpeg"
-		if len(prefix) > 0 {
-			command = "sudo apt-get update && sudo apt-get install -y ffmpeg"
-		}
-		return []string{"sh", "-c", command}
-	}
-	if _, err := exec.LookPath("dnf"); err == nil {
-		return append(prefix, "dnf", "install", "-y", "ffmpeg")
-	}
-	if _, err := exec.LookPath("pacman"); err == nil {
-		return append(prefix, "pacman", "-S", "--needed", "--noconfirm", "ffmpeg")
-	}
+	fmt.Println("managed ffmpeg ready:", ffmpeg)
+	fmt.Println("managed ffprobe ready:", ffprobe)
 	return nil
 }
 
 func installMiniLM(ctx context.Context) error {
-	dir := miniLMDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := runtimeassets.EnsureMiniLM(ctx, "")
+	if err != nil {
 		return err
 	}
-	files := []struct {
-		Name string
-		URL  string
-	}{
-		{Name: "model.onnx", URL: huggingFaceURL("onnx/model.onnx")},
-		{Name: "tokenizer.json", URL: huggingFaceURL("tokenizer.json")},
-	}
-	for _, file := range files {
-		dst := filepath.Join(dir, file.Name)
-		if regularFile(dst) {
-			if file.Name != "tokenizer.json" || validateJSONFile(dst) == nil {
-				fmt.Println("exists:", dst)
-				continue
-			}
-			fmt.Println("invalid cached file, downloading again:", dst)
-			_ = os.Remove(dst)
-		}
-		if err := downloadFile(ctx, file.URL, dst); err != nil {
-			return fmt.Errorf("download %s: %w", file.Name, err)
-		}
-	}
-	if err := validateJSONFile(filepath.Join(dir, "tokenizer.json")); err != nil {
-		return fmt.Errorf("validate tokenizer.json: %w", err)
-	}
-	if _, _, err := rayonnx.ResolveModelFiles(dir); err != nil {
-		return fmt.Errorf("validate MiniLM bundle: %w", err)
-	}
 	fmt.Println("MiniLM ready:", dir)
+	return nil
+}
+
+func installONNXRuntime(ctx context.Context) error {
+	path, err := runtimeassets.EnsureManagedONNXRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Println("managed ONNX Runtime ready:", path)
 	return nil
 }
 
@@ -269,14 +172,18 @@ func stageCommand(args []string) error {
 	if _, err := rayonnx.ResolveEssentiaModelDir(filepath.Join("assets", "models", "essentia")); err != nil {
 		return fmt.Errorf("stage Essentia models: %w", err)
 	}
-	if _, _, err := rayonnx.ResolveModelFiles(miniLMDir()); err != nil {
+	managedMiniLMDir, err := appdirs.ManagedMiniLMDir()
+	if err != nil {
+		return err
+	}
+	if _, _, err := rayonnx.ResolveModelFiles(managedMiniLMDir); err != nil {
 		return fmt.Errorf("stage MiniLM: %w", err)
 	}
-	asset, ok := onnxRuntimeAsset(runtime.GOOS, runtime.GOARCH)
-	if !ok {
-		return fmt.Errorf("portable runtime staging is unsupported for %s/%s", runtime.GOOS, runtime.GOARCH)
+	managedRuntimePath, err := runtimeassets.ManagedONNXRuntimePath()
+	if err != nil {
+		return err
 	}
-	if !regularFile(filepath.Join(onnxRuntimeDir(), asset.Library)) {
+	if !regularFile(managedRuntimePath) {
 		return errors.New("managed ONNX Runtime is missing; run `just deps-onnxruntime`")
 	}
 
@@ -308,11 +215,22 @@ func stageCommand(args []string) error {
 	); err != nil {
 		return fmt.Errorf("stage Essentia models: %w", err)
 	}
-	if err := copyTree(filepath.Join("assets", "runtime"), runtimeDst, func(path string) bool {
+	managedRoot, err := appdirs.AssetsRoot()
+	if err != nil {
+		return err
+	}
+	managedRuntime := filepath.Join(managedRoot, "runtime")
+	if err := copyTree(managedRuntime, runtimeDst, func(path string) bool {
 		return !strings.HasSuffix(path, ".part") &&
 			!strings.HasSuffix(path, ".download")
 	}); err != nil {
 		return fmt.Errorf("stage runtime assets: %w", err)
+	}
+	managedBin := filepath.Join(managedRoot, "bin", runtime.GOOS+"-"+runtime.GOARCH)
+	if info, statErr := os.Stat(managedBin); statErr == nil && info.IsDir() {
+		if err := copyTree(managedBin, filepath.Join(assetsRoot, "bin", runtime.GOOS+"-"+runtime.GOARCH), nil); err != nil {
+			return fmt.Errorf("stage ffmpeg assets: %w", err)
+		}
 	}
 	fmt.Println("portable assets staged:", assetsRoot)
 	return nil
@@ -359,182 +277,6 @@ func copyTree(src, dst string, include func(string) bool) error {
 		}
 		return closeErr
 	})
-}
-
-func huggingFaceURL(path string) string {
-	return fmt.Sprintf("https://huggingface.co/%s/resolve/main/%s?download=true", miniLMRepository, path)
-}
-
-func installONNXRuntime(ctx context.Context) error {
-	asset, ok := onnxRuntimeAsset(runtime.GOOS, runtime.GOARCH)
-	if !ok {
-		return fmt.Errorf("no managed ONNX Runtime %s archive for %s/%s; install ONNX Runtime %s manually and set RAY_PLAYER_ONNXRUNTIME_PATH", onnxRuntimeVersion, runtime.GOOS, runtime.GOARCH, onnxRuntimeVersion)
-	}
-	dir := onnxRuntimeDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	dst := filepath.Join(dir, asset.Library)
-	if regularFile(dst) {
-		if err := rayonnx.TestRuntime(dst); err == nil {
-			fmt.Println("ONNX Runtime exists and passed smoke test:", dst)
-			return nil
-		}
-		fmt.Println("invalid cached ONNX Runtime, downloading again:", dst)
-		_ = os.Remove(dst)
-	}
-
-	archivePath := filepath.Join(dir, asset.Archive+".download")
-	url := fmt.Sprintf("https://github.com/microsoft/onnxruntime/releases/download/v%s/%s", onnxRuntimeVersion, asset.Archive)
-	if err := downloadFile(ctx, url, archivePath); err != nil {
-		return err
-	}
-	defer os.Remove(archivePath)
-
-	if asset.Zip {
-		if err := extractZipMember(archivePath, asset.Member, dst); err != nil {
-			return err
-		}
-	} else if err := extractTarGzipMember(archivePath, asset.Member, dst); err != nil {
-		return err
-	}
-	if err := os.Chmod(dst, 0o755); err != nil && runtime.GOOS != "windows" {
-		return err
-	}
-	if err := rayonnx.TestRuntime(dst); err != nil {
-		_ = os.Remove(dst)
-		return fmt.Errorf("downloaded ONNX Runtime failed smoke test: %w", err)
-	}
-	fmt.Println("ONNX Runtime ready:", dst)
-	return nil
-}
-
-func onnxRuntimeAsset(goos, goarch string) (runtimeAsset, bool) {
-	prefix := "onnxruntime-"
-	switch goos + "/" + goarch {
-	case "darwin/arm64":
-		archive := prefix + "osx-arm64-" + onnxRuntimeVersion + ".tgz"
-		return runtimeAsset{Archive: archive, Member: "/lib/libonnxruntime." + onnxRuntimeVersion + ".dylib", Library: "libonnxruntime." + onnxRuntimeVersion + ".dylib"}, true
-	case "linux/amd64":
-		archive := prefix + "linux-x64-" + onnxRuntimeVersion + ".tgz"
-		return runtimeAsset{Archive: archive, Member: "/lib/libonnxruntime.so." + onnxRuntimeVersion, Library: "libonnxruntime.so." + onnxRuntimeVersion}, true
-	case "linux/arm64":
-		archive := prefix + "linux-aarch64-" + onnxRuntimeVersion + ".tgz"
-		return runtimeAsset{Archive: archive, Member: "/lib/libonnxruntime.so." + onnxRuntimeVersion, Library: "libonnxruntime.so." + onnxRuntimeVersion}, true
-	case "windows/amd64":
-		archive := prefix + "win-x64-" + onnxRuntimeVersion + ".zip"
-		return runtimeAsset{Archive: archive, Member: "/lib/onnxruntime.dll", Library: "onnxruntime.dll", Zip: true}, true
-	case "windows/arm64":
-		archive := prefix + "win-arm64-" + onnxRuntimeVersion + ".zip"
-		return runtimeAsset{Archive: archive, Member: "/lib/onnxruntime.dll", Library: "onnxruntime.dll", Zip: true}, true
-	default:
-		return runtimeAsset{}, false
-	}
-}
-
-func miniLMDir() string {
-	return filepath.Join("assets", "runtime", "models", "paraphrase-multilingual-MiniLM-L12-v2_onnx")
-}
-
-func onnxRuntimeDir() string {
-	return filepath.Join("assets", "runtime", "onnxruntime", runtime.GOOS+"-"+runtime.GOARCH)
-}
-
-func downloadFile(ctx context.Context, url, dst string) error {
-	part := dst + ".part"
-	_ = os.Remove(part)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return fmt.Errorf("GET %s: %s", url, resp.Status)
-	}
-	if resp.ContentLength > maxDownloadBytes {
-		return fmt.Errorf("GET %s: payload too large: %d bytes", url, resp.ContentLength)
-	}
-	f, err := os.OpenFile(part, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	_, copyErr := copyWithLimit(f, resp.Body, maxDownloadBytes)
-	syncErr := f.Sync()
-	closeErr := f.Close()
-	if copyErr != nil {
-		_ = os.Remove(part)
-		return copyErr
-	}
-	if syncErr != nil {
-		_ = os.Remove(part)
-		return syncErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(part)
-		return closeErr
-	}
-	if err := replaceFile(part, dst); err != nil {
-		_ = os.Remove(part)
-		return err
-	}
-	return nil
-}
-
-func extractTarGzipMember(archivePath, memberSuffix, dst string) error {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(filepath.ToSlash(hdr.Name), memberSuffix) {
-			continue
-		}
-		return writeReaderAtomically(dst, tr, 0o755)
-	}
-	return fmt.Errorf("archive member %q not found in %s", memberSuffix, archivePath)
-}
-
-func extractZipMember(archivePath, memberSuffix, dst string) error {
-	zr, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return err
-	}
-	defer zr.Close()
-	for _, file := range zr.File {
-		if file.FileInfo().IsDir() || !strings.HasSuffix(filepath.ToSlash(file.Name), memberSuffix) {
-			continue
-		}
-		r, err := file.Open()
-		if err != nil {
-			return err
-		}
-		err = writeReaderAtomically(dst, r, 0o755)
-		closeErr := r.Close()
-		if err != nil {
-			return err
-		}
-		return closeErr
-	}
-	return fmt.Errorf("archive member %q not found in %s", memberSuffix, archivePath)
 }
 
 func writeReaderAtomically(dst string, r io.Reader, mode os.FileMode) error {
@@ -590,16 +332,4 @@ func copyWithLimit(dst io.Writer, src io.Reader, limit int64) (int64, error) {
 		return written, fmt.Errorf("payload exceeds %d bytes", limit)
 	}
 	return written, nil
-}
-
-func validateJSONFile(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	return nil
 }

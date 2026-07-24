@@ -13,7 +13,7 @@ dev:
 build:
     wails build
 
-# Сборка с локальными ML-ассетами внутри артефакта; ffmpeg остаётся системной зависимостью.
+# Сборка с runtime/model ассетами из пользовательской папки данных внутри артефакта.
 build-portable: deps
     wails build
     go run ./cmd/ray_deps stage --build-dir build/bin
@@ -22,15 +22,15 @@ build-portable: deps
 deps-check:
     go run ./cmd/ray_deps check
 
-# Проверить ffmpeg/ffprobe и установить через системный package manager при необходимости.
+# Проверить ffmpeg/ffprobe и при отсутствии скачать portable-бинарники в пользовательские ассеты.
 deps-ffmpeg:
     go run ./cmd/ray_deps ffmpeg --install
 
-# Скачать официальный ONNX export paraphrase-multilingual-MiniLM-L12-v2 в ignored assets/runtime.
+# Скачать официальный ONNX export paraphrase-multilingual-MiniLM-L12-v2 в пользовательские ассеты.
 deps-minilm:
     go run ./cmd/ray_deps minilm
 
-# Скачать совместимый с onnxruntime_go v1.31.0 ONNX Runtime 1.26.0 в ignored assets/runtime.
+# Скачать совместимый ONNX Runtime 1.26.0 в пользовательские ассеты (для portable/staging).
 deps-onnxruntime:
     go run ./cmd/ray_deps onnxruntime
 

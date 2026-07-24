@@ -21,7 +21,7 @@ type FFmpegConfig struct {
 }
 
 func DefaultFFmpegConfig() FFmpegConfig {
-	return FFmpegConfig{Path: "ffmpeg", SampleRate: 16000, Timeout: 60 * time.Second}
+	return FFmpegConfig{Path: FFmpegPath(), SampleRate: 16000, Timeout: 60 * time.Second}
 }
 
 var ffmpegLog = logx.New("ffmpeg")
@@ -45,7 +45,7 @@ func CheckFFmpeg(path string) (string, error) {
 
 func DecodeMonoFloat32WithFFmpeg(ctx context.Context, audioPath string, cfg FFmpegConfig) ([]float32, int, error) {
 	if cfg.Path == "" {
-		cfg.Path = "ffmpeg"
+		cfg.Path = FFmpegPath()
 	}
 	if cfg.SampleRate <= 0 {
 		cfg.SampleRate = 16000

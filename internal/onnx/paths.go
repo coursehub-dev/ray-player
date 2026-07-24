@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"ray-player1/internal/appdirs"
 )
 
 const (
@@ -61,10 +63,13 @@ func ResolveRuntimeLibrary() (string, error) {
 		return "", err
 	}
 
+	managedRuntimeDir, _ := appdirs.ManagedONNXRuntimeDir()
+
 	for _, candidate := range runtimeLibraryCandidates(
 		filepath.Dir(executable),
 		cwd,
 		os.Getenv("PATH"),
+		managedRuntimeDir,
 		libraryNames,
 	) {
 		if isRegularFile(candidate) {
@@ -127,7 +132,11 @@ func resolveAssetDir(
 		executableDir = filepath.Dir(executable)
 	}
 	cwd, _ := os.Getwd()
-	for _, candidate := range assetDirCandidates(executableDir, cwd, relative) {
+	managed := ""
+	if relative == filepath.Join("assets", "runtime", "models", miniLMRelativeDir) {
+		managed, _ = appdirs.ManagedMiniLMDir()
+	}
+	for _, candidate := range assetDirCandidates(executableDir, cwd, managed, relative) {
 		if err := validate(candidate); err != nil {
 			continue
 		}
@@ -156,8 +165,11 @@ func validateAssetDir(path string, validate func(string) error) (string, error) 
 	return absolute, nil
 }
 
-func assetDirCandidates(executableDir, cwd, relative string) []string {
-	dirs := make([]string, 0, 5)
+func assetDirCandidates(executableDir, cwd, managed, relative string) []string {
+	dirs := make([]string, 0, 6)
+	if strings.TrimSpace(managed) != "" {
+		dirs = append(dirs, managed)
+	}
 	if strings.TrimSpace(executableDir) != "" {
 		dirs = append(dirs,
 			filepath.Join(executableDir, relative),
@@ -193,6 +205,7 @@ func runtimeLibraryCandidates(
 	executableDir string,
 	cwd string,
 	pathEnv string,
+	managedDir string,
 	libraryNames []string,
 ) []string {
 	dirs := []string{
@@ -218,6 +231,9 @@ func runtimeLibraryCandidates(
 		}
 	}
 	dirs = append(dirs, systemRuntimeDirs()...)
+	if strings.TrimSpace(managedDir) != "" {
+		dirs = append(dirs, managedDir)
+	}
 
 	dirs = uniqueCleanPaths(dirs)
 	out := make([]string, 0, len(dirs)*len(libraryNames))

@@ -31,9 +31,7 @@ func TestRuntimeCandidatesIncludeLocalRuntimeAssets(t *testing.T) {
 	}
 	root := filepath.Join("tmp", "ray-player")
 	candidates := runtimeLibraryCandidates(
-		filepath.Join(root, "bin"),
-		root,
-		"",
+		filepath.Join(root, "bin"), root, "", "",
 		names,
 	)
 	want := filepath.Clean(filepath.Join(
@@ -50,6 +48,33 @@ func TestRuntimeCandidatesIncludeLocalRuntimeAssets(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing local runtime candidate %q in %#v", want, candidates)
+}
+
+func TestRuntimeCandidatesPreferSystemSearchBeforeManagedAssets(t *testing.T) {
+	names, err := runtimeLibraryNames()
+	if err != nil {
+		t.Skipf("platform unsupported: %v", err)
+	}
+	managed := filepath.Join("tmp", "managed-runtime")
+	pathDir := filepath.Join("tmp", "system-path")
+	candidates := runtimeLibraryCandidates("", "", pathDir, managed, names)
+	pathCandidate := filepath.Clean(filepath.Join(pathDir, names[0]))
+	managedCandidate := filepath.Clean(filepath.Join(managed, names[0]))
+	indexOf := func(want string) int {
+		for i, candidate := range candidates {
+			if candidate == want {
+				return i
+			}
+		}
+		return -1
+	}
+	pathIndex, managedIndex := indexOf(pathCandidate), indexOf(managedCandidate)
+	if pathIndex < 0 || managedIndex < 0 {
+		t.Fatalf("missing candidates path=%d managed=%d in %#v", pathIndex, managedIndex, candidates)
+	}
+	if pathIndex >= managedIndex {
+		t.Fatalf("managed runtime must be fallback after PATH/system candidates: path=%d managed=%d", pathIndex, managedIndex)
+	}
 }
 
 func TestResolveRuntimeLibraryHonorsStandardWrapperEnv(t *testing.T) {
@@ -110,7 +135,7 @@ func TestRuntimeCandidatesIncludeMacAppResourcesLayout(t *testing.T) {
 	}
 	root := filepath.Join("tmp", "Ray Player.app", "Contents")
 	executableDir := filepath.Join(root, "MacOS")
-	candidates := runtimeLibraryCandidates(executableDir, "", "", names)
+	candidates := runtimeLibraryCandidates(executableDir, "", "", "", names)
 	want := filepath.Clean(filepath.Join(
 		root,
 		"Resources",

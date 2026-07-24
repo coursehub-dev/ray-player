@@ -65,10 +65,6 @@ type FFmpegPCMStreamer struct {
 	mu     sync.Mutex
 }
 
-func FFmpegPath() string {
-	return "ffmpeg"
-}
-
 func NewFFmpegPCMStreamer(
 	ctx context.Context,
 	path string,

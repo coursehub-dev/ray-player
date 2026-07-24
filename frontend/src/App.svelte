@@ -28,6 +28,7 @@ import RayTrackRow from "./components/RayTrackRow.svelte";
 import RayBuildSkeleton from "./components/RayBuildSkeleton.svelte";
 import PodcastProgressBar from "./components/PodcastProgressBar.svelte";
 import AddLinkModal from "./components/AddLinkModal.svelte";
+import DoctorModal from "./components/DoctorModal.svelte";
 import SettingsSwitch from "./components/SettingsSwitch.svelte";
 import { api } from "./lib/api";
 import { isPodcastItemId } from "./lib/mediaIdentity";
@@ -67,6 +68,7 @@ import {
 	GripVertical,
 	Trash2,
 	Link,
+	Stethoscope,
 } from "lucide-svelte";
 
 let appState = {
@@ -192,6 +194,7 @@ const defaultMusicAccentStyle = [
 ].join(";");
 
 let showSettings = false;
+let showDoctor = false;
 let showAdvanced = false;
 let dragDepth = 0;
 let isDragging = false;
@@ -202,6 +205,7 @@ let settingsPayload = {
 	miniLMModelDir: "",
 	essentiaModelDir: "",
 	ffmpegPath: "ffmpeg",
+	ffprobePath: "ffprobe",
 	storagePath: "",
 	emoFlowUi: {
 		enabled: true,
@@ -729,6 +733,10 @@ const focusSearch = async () => {
 const handleKeydown = async (event) => {
 	if (event.key === "Escape") {
 		contextMenu = null;
+		if (showDoctor) {
+			showDoctor = false;
+			return;
+		}
 		if (showSettings) {
 			showSettings = false;
 		}
@@ -940,6 +948,7 @@ const changeVolume = async (event) => {
 };
 
 const openSettings = async () => {
+	showDoctor = false;
 	settingsPayload = await api.getSettings();
 	settingsPayload.emoFlowUi = {
 		enabled: true,
@@ -984,7 +993,24 @@ const pickEssentiaDir = async () => {
 };
 const saveSettings = async () => {
 	await syncPayload(api.saveSettings(settingsPayload));
+	showDoctor = false;
 	showSettings = false;
+};
+
+const applyDoctorPatch = (patch) => {
+	settingsPayload = {
+		...settingsPayload,
+		...(patch?.onnxRuntimePath
+			? { onnxRuntimePath: patch.onnxRuntimePath }
+			: {}),
+		...(patch?.miniLMModelDir ? { miniLMModelDir: patch.miniLMModelDir } : {}),
+		...(patch?.ffmpegPath ? { ffmpegPath: patch.ffmpegPath } : {}),
+		...(patch?.ffprobePath ? { ffprobePath: patch.ffprobePath } : {}),
+	};
+	runtimeTestResult = null;
+	miniLMTestResult = null;
+	essentiaTestResult = null;
+	ffmpegTestResult = null;
 };
 
 const checkYtDlp = async () => {
@@ -2701,8 +2727,9 @@ $: playerSubline = playingPodcast
 {#if showSettings}
     <div
         class="settings-overlay"
-        role="presentation"
-        on:pointerdown={(e) => e.target === e.currentTarget && (showSettings = false)}
+	role="presentation"
+	class:doctor-open={showDoctor}
+	on:pointerdown={(e) => e.target === e.currentTarget && (showSettings = false)}
     >
         <section
             class="settings-modal"
@@ -2717,14 +2744,24 @@ $: playerSubline = playingPodcast
                     <p>Настройки приложения и медиатеки.</p>
                 </div>
 
-                <button
-                    type="button"
-                    class="icon-button"
-                    aria-label="Закрыть настройки"
-                    on:click={() => (showSettings = false)}
-                >
-                    <X size={18} />
-                </button>
+			<div class="settings-header-actions">
+				<button
+					type="button"
+					class="ghost-btn compact doctor-launch"
+					on:click={() => (showDoctor = true)}
+				>
+					<Stethoscope size={15} />
+					<span>Доктор</span>
+				</button>
+				<button
+					type="button"
+					class="icon-button"
+					aria-label="Закрыть настройки"
+					on:click={() => { showDoctor = false; showSettings = false; }}
+				>
+					<X size={18} />
+				</button>
+			</div>
             </header>
 
             <div class="settings-scroll">
@@ -3114,8 +3151,8 @@ $: playerSubline = playingPodcast
                 <button
                     type="button"
                     class="secondary-button ghost-btn compact"
-                    on:click={() => (showSettings = false)}
-                    >Закрыть</button
+				on:click={() => { showDoctor = false; showSettings = false; }}
+				>Закрыть</button
                 >
 
                 <button
@@ -3127,6 +3164,14 @@ $: playerSubline = playingPodcast
             </footer>
         </section>
     </div>
+{/if}
+
+{#if showDoctor}
+	<DoctorModal
+		settings={settingsPayload}
+		on:close={() => (showDoctor = false)}
+		on:patch={(event) => applyDoctorPatch(event.detail)}
+	/>
 {/if}
 
 <AddLinkModal

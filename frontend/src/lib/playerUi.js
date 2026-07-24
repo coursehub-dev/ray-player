@@ -8,9 +8,7 @@ export const resolveVisualMode = (libraryMode) =>
 	normalizeLibraryMode(libraryMode);
 
 export const hasPlaybackSelection = (playback, currentPodcast = null) =>
-	Boolean(
-		currentPodcast?.id || String(playback?.currentTrackId || "").trim(),
-	);
+	Boolean(currentPodcast?.id || String(playback?.currentTrackId || "").trim());
 
 export const resolvePlayerTitle = ({
 	libraryMode,

@@ -271,6 +271,28 @@ func TestGenreTagsRequireConfidentPrimary(t *testing.T) {
 	}
 }
 
+func TestGenreDetailForUISuppressesKnownWeakCollapseLabels(t *testing.T) {
+	for _, tc := range []GenreGroupCandidate{
+		{Label: "Rock", BestSubLabel: "Rock---Black Metal", BestSubScore: 0.22, Support: 4},
+		{Label: "Hip Hop", BestSubLabel: "Hip Hop---DJ Battle Tool", BestSubScore: 0.20, Support: 3},
+		{Label: "Rock", BestSubLabel: "Rock---Pop Rock", BestSubScore: 0.15, Support: 5},
+	} {
+		if got := genreDetailForUI(tc); got != "" {
+			t.Fatalf("genreDetailForUI(%+v)=%q want empty", tc, got)
+		}
+	}
+	if got := genreDetailForUI(GenreGroupCandidate{
+		Label: "Rock", BestSubLabel: "Rock---Black Metal", BestSubScore: 0.31, Support: 4,
+	}); got != "Rock / Black Metal" {
+		t.Fatalf("strong collapse-prone detail=%q", got)
+	}
+	if got := genreDetailForUI(GenreGroupCandidate{
+		Label: "Electronic", BestSubLabel: "Electronic---Deep House", BestSubScore: 0.19, Support: 3,
+	}); got != "Electronic / Deep House" {
+		t.Fatalf("ordinary detail=%q", got)
+	}
+}
+
 func TestFlattenPatchPredictionsPreservesAllRows(t *testing.T) {
 	rows := [][]float32{{0.1, 0.2}, {0.3, 0.4}, {0.5, 0.6}}
 	got := flattenPatchPredictions(rows)

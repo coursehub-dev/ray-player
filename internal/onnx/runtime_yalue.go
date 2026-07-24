@@ -3,6 +3,7 @@ package onnx
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -20,6 +21,20 @@ func AcquireEnvironment() error {
 }
 
 func AcquireEnvironmentWithPath(runtimePath string) error {
+	// Parameterless callers are allowed to join an already initialized
+	// process-wide environment. Resolving the library again here is both
+	// unnecessary and wrong when the first owner used an explicit path that
+	// is not discoverable through PATH/system locations.
+	if strings.TrimSpace(runtimePath) == "" {
+		environmentMu.Lock()
+		if environmentInitialized {
+			environmentReferences++
+			environmentMu.Unlock()
+			return nil
+		}
+		environmentMu.Unlock()
+	}
+
 	libraryPath, err := ResolveRuntimeLibraryPath(runtimePath)
 	if err != nil {
 		return err

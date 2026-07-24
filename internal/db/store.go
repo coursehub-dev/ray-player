@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"ray-player1/internal/appdirs"
 	"ray-player1/internal/logx"
 
 	"ray-player1/internal/onnx"
@@ -1886,13 +1887,5 @@ func (s *Store) dropStaleTracksFTS() error {
 }
 
 func resolveWritableRoot(appName string) (string, error) {
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
-	}
-	root := filepath.Join(cfgDir, appName)
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return "", fmt.Errorf("create storage dir %q: %w", root, err)
-	}
-	return root, nil
+	return appdirs.Root(appName)
 }

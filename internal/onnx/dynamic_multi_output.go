@@ -27,7 +27,17 @@ func NewDynamicMultiOutputFloatModel(
 	inputName string,
 	outputNames []string,
 ) (*DynamicMultiOutputFloatModel, error) {
-	if err := AcquireEnvironment(); err != nil {
+	return NewDynamicMultiOutputFloatModelWithPath("", name, modelPath, inputName, outputNames)
+}
+
+func NewDynamicMultiOutputFloatModelWithPath(
+	runtimePath string,
+	name string,
+	modelPath string,
+	inputName string,
+	outputNames []string,
+) (*DynamicMultiOutputFloatModel, error) {
+	if err := AcquireEnvironmentWithPath(runtimePath); err != nil {
 		return nil, err
 	}
 

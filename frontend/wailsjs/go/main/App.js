@@ -46,6 +46,14 @@ export function DeleteExternalItem(arg1, arg2, arg3) {
   return window['go']['main']['App']['DeleteExternalItem'](arg1, arg2, arg3);
 }
 
+export function DoctorCheck(arg1, arg2) {
+  return window['go']['main']['App']['DoctorCheck'](arg1, arg2);
+}
+
+export function DoctorRepair(arg1, arg2) {
+  return window['go']['main']['App']['DoctorRepair'](arg1, arg2);
+}
+
 export function GetCurrentEmoFlow() {
   return window['go']['main']['App']['GetCurrentEmoFlow']();
 }
