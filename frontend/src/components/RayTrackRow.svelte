@@ -120,13 +120,21 @@ $: metadataTrack = {
         <GripVertical size={15} strokeWidth={1.8} />
     </span>
 
-    <button
-        type="button"
+    <span
+        role="button"
+        tabindex="0"
         class="ray-track-play"
         aria-label={isPlaying
             ? "Поставить на паузу"
             : "Воспроизвести трек"}
         on:click|stopPropagation={open}
+        on:keydown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                open();
+            }
+        }}
     >
         {#if isLoading}
             <LoaderCircle
@@ -139,7 +147,7 @@ $: metadataTrack = {
         {:else}
             <Play size={16} strokeWidth={2} />
         {/if}
-    </button>
+    </span>
 
     <div class="ray-track-text">
         <div class="ray-track-title-line">
@@ -185,12 +193,19 @@ $: metadataTrack = {
         </span>
     {/if}
 
-    <button
-        type="button"
+    <span
+        role="button"
+        tabindex="0"
         class="ray-track-menu"
         aria-label="Меню трека"
         on:click={openMenu}
+        on:keydown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openMenu(event);
+            }
+        }}
     >
         ⋯
-    </button>
+    </span>
 </button>

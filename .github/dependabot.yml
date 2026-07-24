@@ -19,13 +19,36 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      svelte-toolchain:
+        applies-to: version-updates
+        patterns:
+          - "svelte"
+          - "@sveltejs/vite-plugin-svelte"
+          - "vite"
+        update-types:
+          - minor
+          - patch
       npm-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"
+        exclude-patterns:
+          - "svelte"
+          - "@sveltejs/vite-plugin-svelte"
+          - "vite"
         update-types:
           - minor
           - patch
+    ignore:
+      - dependency-name: "svelte"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@sveltejs/vite-plugin-svelte"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "vite"
+        update-types:
+          - "version-update:semver-major"
   - package-ecosystem: github-actions
     directory: /
     schedule:

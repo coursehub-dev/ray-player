@@ -4,7 +4,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org/dl/)
 [![Wails](https://img.shields.io/badge/Wails-v2-red?style=for-the-badge&logo=wails)](https://wails.io/)
-[![Svelte](https://img.shields.io/badge/Svelte-4-FF3E00?style=for-the-badge&logo=svelte&logoColor=white)](https://svelte.dev/)
+[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=for-the-badge&logo=svelte&logoColor=white)](https://svelte.dev/)
 [![ONNX](https://img.shields.io/badge/ONNX-Machine%20Learning-FF6F00?style=for-the-badge&logo=onnx&logoColor=white)](https://onnx.ai/)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=for-the-badge)]()
 

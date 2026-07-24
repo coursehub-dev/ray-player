@@ -7,7 +7,8 @@
 Обязательные инструменты:
 
 - Go версии, указанной в `go.mod`;
-- Node.js 22 или новее и npm;
+- Node.js версии, указанной в `.node-version`;
+- npm версии, указанной в `frontend/package.json` в поле `packageManager`;
 - Wails CLI той же major/minor-ветки, что и зависимость `github.com/wailsapp/wails/v2`;
 - `just`;
 - системные зависимости Wails для вашей ОС.
@@ -53,6 +54,24 @@ git switch -c fix/short-description
 - Для новой бизнес-логики сначала добавляйте тест, воспроизводящий требуемое поведение.
 - Не добавляйте сетевые действия в git hooks. Pre-commit проекта только проверяет `gofmt`.
 - Новые внешние зависимости должны иметь понятную необходимость и совместимую лицензию.
+
+Frontend toolchain `svelte`, `@sveltejs/vite-plugin-svelte` и `vite`
+считается одной совместимой единицей:
+
+- не обновляйте один из этих пакетов на новый major отдельно;
+- не используйте `--force` или `--legacy-peer-deps`;
+- после изменения зависимостей полностью перегенерируйте lock-файл теми
+  версиями Node/npm, которые закреплены проектом;
+- обновите `frontend/package.json.md5`.
+
+```bash
+cd frontend
+rm -rf node_modules package-lock.json
+npm install --package-lock-only --strict-peer-deps
+npm ci --strict-peer-deps
+npm run deps:check
+cd ..
+```
 
 ## 4. Разработка
 

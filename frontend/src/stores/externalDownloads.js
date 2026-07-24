@@ -23,6 +23,7 @@ function updateJob(job) {
 
 export function bindExternalDownloadEvents() {
 	if (bound) return;
+	if (!globalThis?.window?.runtime?.EventsOn) return;
 	bound = true;
 	for (const eventName of eventNames) {
 		EventsOn(eventName, updateJob);
