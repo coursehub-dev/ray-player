@@ -9,11 +9,16 @@ default:
 dev:
     wails dev
 
-# Ray Player - Сборка
+# Ray Player - Обычная сборка (использует уже доступные runtime/model assets).
 build:
     wails build
 
-# Проверить ffmpeg, MiniLM и локальный ONNX Runtime.
+# Сборка с локальными ML-ассетами внутри артефакта; ffmpeg остаётся системной зависимостью.
+build-portable: deps
+    wails build
+    go run ./cmd/ray_deps stage --build-dir build/bin
+
+# Проверить ffmpeg, модели и реально выбранный ONNX Runtime (локальный или системный).
 deps-check:
     go run ./cmd/ray_deps check
 
@@ -29,9 +34,13 @@ deps-minilm:
 deps-onnxruntime:
     go run ./cmd/ray_deps onnxruntime
 
-# Подготовить все runtime-зависимости для локальной разработки.
-deps: deps-ffmpeg deps-minilm deps-onnxruntime
-    @echo "Runtime dependencies are ready"
+# Подготовить все runtime-зависимости и сразу выполнить реальный smoke-test.
+deps:
+    go run ./cmd/ray_deps ffmpeg --install
+    go run ./cmd/ray_deps onnxruntime
+    go run ./cmd/ray_deps minilm
+    go run ./cmd/ray_deps check
+    @echo "Runtime dependencies are ready and verified"
 
 # Ray Player - Тесты
 test:
@@ -45,12 +54,20 @@ test-race:
 test-cover:
     go test -count=1 -cover ./...
 
-# Pure-JS тесты frontend state machine / EmoFlow.
+# Pure-JS тесты frontend state machine / UI contracts / EmoFlow.
 test-frontend:
     npm --prefix frontend test
 
+# Проверка production-сборки Svelte/Vite.
+frontend-build:
+    npm --prefix frontend run build
+
+# Статический анализ Go.
+vet:
+    go vet ./...
+
 # Полный локальный quality gate перед коммитом.
-test-all: test test-race test-cover test-frontend
+test-all: vet test test-race test-cover test-frontend frontend-build
     @echo "All quality gates passed"
 
 # Ray Player - Очистка кэша тестов и запуск

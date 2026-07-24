@@ -12,10 +12,10 @@ func TestToUltraShortTrackKeepsRequiredFields(t *testing.T) {
 		Expected:        "joy_party",
 		Match:           true,
 		CompatibleMatch: true,
-		F: ShortFeatureValues{Dance: 0.91, Val: 0.63, Happy: 0.21, Relax: 0.67, Party: 0.42},
-		Audio2: ShortAudioTexture2{Flatness: 0.02, Rolloff85: 3300, Flux: 0.21, OnsetRate: 1.3},
-		Basis3: ShortBasis3{Label: "joy_party", Motion: 0.71, Joy: 0.64, Combat: 0.18, SprintClean: 0.69},
-		Basis3Debug: Basis3Debug{CleanParty: 0.72, TopLabels: []LabelScore{{Label: "joy_party", Score: 0.72, Passed: true}}},
+		F:               ShortFeatureValues{Dance: 0.91, Val: 0.63, Happy: 0.21, Relax: 0.67, Party: 0.42},
+		Audio2:          ShortAudioTexture2{Flatness: 0.02, Rolloff85: 3300, Flux: 0.21, OnsetRate: 1.3},
+		Basis3:          ShortBasis3{Label: "joy_party", Motion: 0.71, Joy: 0.64, Combat: 0.18, SprintClean: 0.69},
+		Basis3Debug:     Basis3Debug{CleanParty: 0.72, TopLabels: []LabelScore{{Label: "joy_party", Score: 0.72, Passed: true}}},
 	}
 
 	got := toUltraShortTrack(tr)

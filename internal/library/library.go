@@ -967,7 +967,6 @@ func (s *Service) analyzeTrack(parent context.Context, job analysisJob) (Track, 
 	return track, nil
 }
 
-
 func applySemanticAnalysisState(track *Track, semanticReady bool, semanticErr error) {
 	if track == nil {
 		return

@@ -12,9 +12,28 @@ import (
 const (
 	runtimePathEnv                = "RAY_PLAYER_ONNXRUNTIME_PATH"
 	standardRuntimePathEnv        = "ONNXRUNTIME_SHARED_LIBRARY_PATH"
+	miniLMDirEnv                  = "RAY_PLAYER_MINILM_DIR"
+	essentiaDirEnv                = "RAY_PLAYER_ESSENTIA_DIR"
 	requiredONNXRuntimeVersion    = "1.26.0"
 	requiredONNXRuntimeAPIVersion = 26
 )
+
+const miniLMRelativeDir = "paraphrase-multilingual-MiniLM-L12-v2_onnx"
+
+func ResolveRuntimeLibraryPath(configured string) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return ResolveRuntimeLibrary()
+	}
+	path, err := filepath.Abs(configured)
+	if err != nil {
+		return "", err
+	}
+	if !isRegularFile(path) {
+		return "", fmt.Errorf("runtime library missing: %s", path)
+	}
+	return path, nil
+}
 
 func ResolveRuntimeLibrary() (string, error) {
 	for _, envName := range []string{runtimePathEnv, standardRuntimePathEnv} {
@@ -64,6 +83,112 @@ func ResolveRuntimeLibrary() (string, error) {
 	)
 }
 
+func ResolveMiniLMModelDir(configured string) (string, error) {
+	return resolveAssetDir(
+		configured,
+		miniLMDirEnv,
+		filepath.Join("assets", "runtime", "models", miniLMRelativeDir),
+		func(dir string) error {
+			_, _, err := ResolveModelFiles(dir)
+			return err
+		},
+	)
+}
+
+func ResolveEssentiaModelDir(configured string) (string, error) {
+	return resolveAssetDir(
+		configured,
+		essentiaDirEnv,
+		filepath.Join("assets", "models", "essentia"),
+		validateEssentiaModelDir,
+	)
+}
+
+func resolveAssetDir(
+	configured string,
+	envName string,
+	relative string,
+	validate func(string) error,
+) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		return validateAssetDir(configured, validate)
+	}
+	if fromEnv := strings.TrimSpace(os.Getenv(envName)); fromEnv != "" {
+		dir, err := validateAssetDir(fromEnv, validate)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", envName, err)
+		}
+		return dir, nil
+	}
+
+	executableDir := ""
+	if executable, err := os.Executable(); err == nil {
+		executableDir = filepath.Dir(executable)
+	}
+	cwd, _ := os.Getwd()
+	for _, candidate := range assetDirCandidates(executableDir, cwd, relative) {
+		if err := validate(candidate); err != nil {
+			continue
+		}
+		absolute, err := filepath.Abs(candidate)
+		if err != nil {
+			return "", err
+		}
+		return absolute, nil
+	}
+
+	return "", fmt.Errorf(
+		"model assets not found for %s; run `just deps` or configure %s",
+		relative,
+		envName,
+	)
+}
+
+func validateAssetDir(path string, validate func(string) error) (string, error) {
+	absolute, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil {
+		return "", err
+	}
+	if err := validate(absolute); err != nil {
+		return "", fmt.Errorf("invalid model directory %s: %w", absolute, err)
+	}
+	return absolute, nil
+}
+
+func assetDirCandidates(executableDir, cwd, relative string) []string {
+	dirs := make([]string, 0, 5)
+	if strings.TrimSpace(executableDir) != "" {
+		dirs = append(dirs,
+			filepath.Join(executableDir, relative),
+			filepath.Join(executableDir, "resources", relative),
+			filepath.Join(executableDir, "..", "Resources", relative),
+		)
+	}
+	if strings.TrimSpace(cwd) != "" {
+		dirs = append(dirs, filepath.Join(cwd, relative))
+	}
+	return uniqueCleanPaths(dirs)
+}
+
+func validateEssentiaModelDir(dir string) error {
+	required := []string{
+		"discogs-effnet-bs64-1.onnx",
+		"discogs-effnet-bs64-1.json",
+		"genre_discogs400-discogs-effnet-1.onnx",
+		"genre_discogs400-discogs-effnet-1.json",
+		"deeptemp-k4-3.onnx",
+		"deeptemp-k4-3.json",
+	}
+	for _, name := range required {
+		path := filepath.Join(dir, name)
+		if !isRegularFile(path) {
+			return fmt.Errorf("required model file missing: %s", path)
+		}
+	}
+	return nil
+}
+
 func runtimeLibraryCandidates(
 	executableDir string,
 	cwd string,
@@ -76,6 +201,9 @@ func runtimeLibraryCandidates(
 		filepath.Join(executableDir, "runtime"),
 		filepath.Join(executableDir, "runtime", runtime.GOOS+"-"+runtime.GOARCH),
 		filepath.Join(executableDir, "assets", "runtime", "onnxruntime", runtime.GOOS+"-"+runtime.GOARCH),
+		filepath.Join(executableDir, "..", "Resources"),
+		filepath.Join(executableDir, "..", "Resources", "runtime", runtime.GOOS+"-"+runtime.GOARCH),
+		filepath.Join(executableDir, "..", "Resources", "assets", "runtime", "onnxruntime", runtime.GOOS+"-"+runtime.GOARCH),
 	}
 	if strings.TrimSpace(cwd) != "" {
 		dirs = append(dirs,
@@ -91,16 +219,29 @@ func runtimeLibraryCandidates(
 	}
 	dirs = append(dirs, systemRuntimeDirs()...)
 
-	seen := map[string]bool{}
+	dirs = uniqueCleanPaths(dirs)
 	out := make([]string, 0, len(dirs)*len(libraryNames))
 	for _, dir := range dirs {
 		for _, name := range libraryNames {
-			candidate := filepath.Clean(filepath.Join(dir, name))
-			if !seen[candidate] {
-				seen[candidate] = true
-				out = append(out, candidate)
-			}
+			out = append(out, filepath.Clean(filepath.Join(dir, name)))
 		}
+	}
+	return out
+}
+
+func uniqueCleanPaths(paths []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
 	}
 	return out
 }
@@ -154,5 +295,5 @@ func systemRuntimeDirs() []string {
 
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular()
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
 }

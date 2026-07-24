@@ -69,9 +69,10 @@ type PlayerState struct {
 }
 
 type Store struct {
-	mu    sync.RWMutex
-	state PlayerState
-	db    *db.Store
+	mu        sync.RWMutex
+	persistMu sync.Mutex
+	state     PlayerState
+	db        *db.Store
 }
 
 func NewStore(dbx *db.Store) *Store {
@@ -123,33 +124,82 @@ func (s *Store) Load(librarySvc *library.Service, raySvc *rays.Service) error {
 	return nil
 }
 
-func (s *Store) Get() PlayerState { s.mu.RLock(); defer s.mu.RUnlock(); return s.state }
+func (s *Store) Get() PlayerState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return clonePlayerState(s.state)
+}
 
 func (s *Store) Replace(st PlayerState) {
+	s.replace(st, true)
+}
+
+// ReplaceTransient updates in-memory player state without persisting it.
+// It is used for high-frequency UI previews such as a volume drag.
+func (s *Store) ReplaceTransient(st PlayerState) {
+	s.replace(st, false)
+}
+
+func (s *Store) replace(st PlayerState, persist bool) {
 	st.Playing = st.Status == PlaybackPlaying
 	st.CurrentRayID = st.RayID
-	st.QueueLength = len(st.Queue)
-	st.QueueIndex = queueIndex(st.Queue, st.CurrentTrackID)
+	st.Queue = cloneQueue(st.Queue)
+	if st.Queue != nil {
+		st.QueueLength = len(st.Queue)
+		st.QueueIndex = queueIndex(st.Queue, st.CurrentTrackID)
+	}
 	st.UpdatedAt = time.Now().UnixMilli()
+
+	if persist && s.db != nil {
+		s.persistMu.Lock()
+		defer s.persistMu.Unlock()
+	}
 
 	s.mu.Lock()
 	s.state = st
-	persist := db.AppStateRow{CurrentTrackID: st.CurrentTrackID, PositionMs: st.PositionMs, Volume: st.Volume, Playing: st.Playing, CurrentRayID: st.CurrentRayID}
 	s.mu.Unlock()
-	go func() { _ = s.db.SetAppState(persist) }()
+	if !persist || s.db == nil {
+		return
+	}
+
+	_ = s.db.SetAppState(db.AppStateRow{
+		CurrentTrackID: st.CurrentTrackID,
+		PositionMs:     st.PositionMs,
+		Volume:         st.Volume,
+		Playing:        st.Playing,
+		CurrentRayID:   st.CurrentRayID,
+	})
+}
+
+func clonePlayerState(st PlayerState) PlayerState {
+	st.Queue = cloneQueue(st.Queue)
+	return st
+}
+
+func cloneQueue(queue []rays.QueueItem) []rays.QueueItem {
+	if queue == nil {
+		return nil
+	}
+	return append([]rays.QueueItem{}, queue...)
 }
 
 func (s *Store) SetPlaybackPosition(positionMs int, persist bool) {
+	if persist && s.db != nil {
+		s.persistMu.Lock()
+		defer s.persistMu.Unlock()
+	}
+
 	s.mu.Lock()
 	s.state.PositionMs = positionMs
 	s.state.PositionLabel = fmt.Sprintf("%d:%02d", positionMs/60000, (positionMs/1000)%60)
 	st := s.state
 	s.mu.Unlock()
-	if persist {
+	if persist && s.db != nil {
 		_ = s.db.SetAppState(db.AppStateRow{CurrentTrackID: st.CurrentTrackID, PositionMs: st.PositionMs, Volume: st.Volume, Playing: st.Playing, CurrentRayID: st.CurrentRayID})
 	}
 }
 func (s *Store) SetCurrent(track library.Track, rayID string, queue []rays.QueueItem, positionMs int) {
+	queue = cloneQueue(queue)
 	for i := range queue {
 		if queue[i].TrackID == track.ID && queue[i].Track.ID == "" {
 			queue[i].Track = track

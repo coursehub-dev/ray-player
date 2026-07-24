@@ -36,8 +36,8 @@ import (
 var appLog = logx.New("App")
 
 const (
-	metaPlayerMuted           = "player.muted"
-	metaPlayerLastNonZeroVol  = "player.last_nonzero_volume"
+	metaPlayerMuted            = "player.muted"
+	metaPlayerLastNonZeroVol   = "player.last_nonzero_volume"
 	metaNormalizePodcastVolume = "podcast.normalize_volume"
 )
 
@@ -87,6 +87,13 @@ type App struct {
 	lastPodcastPositionMs int
 
 	externalDownloads *externalmedia.Worker
+
+	lifecycleMu  sync.Mutex
+	runCtx       context.Context
+	runCancel    context.CancelFunc
+	backgroundWG sync.WaitGroup
+	shuttingDown bool
+	shutdownOnce sync.Once
 }
 
 type playbackMilestones struct {
@@ -98,23 +105,23 @@ type playbackMilestones struct {
 }
 
 type BootstrapPayload struct {
-	Library           []library.Track        `json:"library"`
-	Podcasts          []podcast.Item         `json:"podcasts"`
-	PodcastRay        podcast.Ray            `json:"podcastRay"`
-	PodcastPlayback   podcast.Playback       `json:"podcastPlayback"`
-	PodcastHistory    []podcast.HistoryItem  `json:"podcastHistory"`
+	Library           []library.Track          `json:"library"`
+	Podcasts          []podcast.Item           `json:"podcasts"`
+	PodcastRay        podcast.Ray              `json:"podcastRay"`
+	PodcastPlayback   podcast.Playback         `json:"podcastPlayback"`
+	PodcastHistory    []podcast.HistoryItem    `json:"podcastHistory"`
 	PodcastRays       []podcast.RayHistoryItem `json:"podcastRays"`
-	Current           appstate.PlayerState   `json:"current"`
-	History           []events.HistoryItem   `json:"history"`
-	Rays              []rays.RaySummary      `json:"rays"`
-	Queue             []rays.QueueItem       `json:"queue"`
-	MusicRay          rays.Ray               `json:"musicRay"`
-	LibraryStat       library.LibraryStats   `json:"libraryStat"`
-	Roots             []library.LibraryRoot  `json:"roots,omitempty"`
-	ImportErrors      []library.FileError    `json:"importErrors,omitempty"`
-	EmoFlow           emoflow.UIState        `json:"emoFlow"`
-	EmoFlowUISettings emoflow.UISettings     `json:"emoFlowUiSettings"`
-	RayBuild          appstate.RayBuildState `json:"rayBuild"`
+	Current           appstate.PlayerState     `json:"current"`
+	History           []events.HistoryItem     `json:"history"`
+	Rays              []rays.RaySummary        `json:"rays"`
+	Queue             []rays.QueueItem         `json:"queue"`
+	MusicRay          rays.Ray                 `json:"musicRay"`
+	LibraryStat       library.LibraryStats     `json:"libraryStat"`
+	Roots             []library.LibraryRoot    `json:"roots,omitempty"`
+	ImportErrors      []library.FileError      `json:"importErrors,omitempty"`
+	EmoFlow           emoflow.UIState          `json:"emoFlow"`
+	EmoFlowUISettings emoflow.UISettings       `json:"emoFlowUiSettings"`
+	RayBuild          appstate.RayBuildState   `json:"rayBuild"`
 }
 
 type SettingsPayload struct {
@@ -213,21 +220,22 @@ func NewApp() *App {
 	var tempoEngine *onnx.TempoEngine
 
 	runtimePath := strings.TrimSpace(appSettings.OnnxRuntimePath)
-	modelDir := strings.TrimSpace(appSettings.EssentiaModelDir)
+	modelDir, modelDirErr := onnx.ResolveEssentiaModelDir(
+		appSettings.EssentiaModelDir,
+	)
+	if modelDirErr != nil {
+		appLog.W("Essentia model bundle unavailable: %v", modelDirErr)
+		modelDir = ""
+	}
+	miniLMDir, miniLMDirErr := onnx.ResolveMiniLMModelDir(
+		appSettings.MiniLMModelDir,
+	)
+	if miniLMDirErr != nil {
+		appLog.W("MiniLM model bundle unavailable: %v", miniLMDirErr)
+		miniLMDir = ""
+	}
 	analysis.SetFFmpegPath(appSettings.FFmpegPath)
 	analysis.SetFFprobePath(appSettings.FFprobePath)
-	if modelDir == "" {
-		modelDir, _ = filepath.Abs(filepath.Join("assets", "models", "essentia"))
-	}
-	miniLMDir := strings.TrimSpace(appSettings.MiniLMModelDir)
-	if miniLMDir == "" {
-		miniLMDir, _ = filepath.Abs(filepath.Join(
-			"assets",
-			"runtime",
-			"models",
-			"paraphrase-multilingual-MiniLM-L12-v2_onnx",
-		))
-	}
 	if miniLMDir != "" {
 		if eng, initErr := onnx.New(runtimePath, miniLMDir); initErr == nil {
 			engine = eng
@@ -258,19 +266,19 @@ func NewApp() *App {
 	state := appstate.NewStore(store)
 	evt := events.NewService(store, lib)
 	app := &App{
-		store:    store,
-		state:    state,
+		store:          store,
+		state:          state,
 		library:        lib,
 		podcasts:       podcastSvc,
 		podcastHistory: podcastHistory,
 		search:         search.NewService(store),
-		rec:      recommend.NewService(evt, raySvc),
-		events:   evt,
-		rays:     raySvc,
-		audio:    audio.NewService(state, evt),
-		onnx:     engine,
-		essentia: essentiaEngine,
-		tempo:    tempoEngine,
+		rec:            recommend.NewService(evt, raySvc),
+		events:         evt,
+		rays:           raySvc,
+		audio:          audio.NewService(state, evt),
+		onnx:           engine,
+		essentia:       essentiaEngine,
+		tempo:          tempoEngine,
 	}
 
 	app.externalDownloads = externalmedia.NewWorker(
@@ -314,6 +322,10 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.lifecycleMu.Lock()
+	a.runCtx, a.runCancel = context.WithCancel(ctx)
+	a.shuttingDown = false
+	a.lifecycleMu.Unlock()
 
 	if a.podcastHistory != nil {
 		if err := a.podcastHistory.Recover(); err != nil {
@@ -367,7 +379,9 @@ func (a *App) startup(ctx context.Context) {
 		a.audio.SetPodcastNormalization(true)
 	}
 
-	go a.playbackTicker()
+	a.launchBackground(func(ctx context.Context) {
+		a.playbackTicker(ctx)
+	})
 	a.pushSnapshot()
 
 	if a.ctx != nil {
@@ -376,7 +390,19 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.shutdownOnce.Do(func() {
+		a.shutdownNow(ctx)
+	})
+}
+
+func (a *App) shutdownNow(ctx context.Context) {
 	_ = ctx
+
+	if a.externalDownloads != nil {
+		a.externalDownloads.Close()
+	}
+	a.cancelPlayRequest()
+	a.stopBackgroundWork()
 
 	st := a.state.Get()
 	if isPodcastTrackID(st.CurrentTrackID) && a.podcastHistory != nil {
@@ -392,13 +418,12 @@ func (a *App) shutdown(ctx context.Context) {
 		)
 	}
 
-	if a.externalDownloads != nil {
-		a.externalDownloads.Close()
-	}
-
-	a.cancelPlayRequest()
 	a.persistPlaybackSession(true)
 	a.persistCurrentRayState()
+	if a.audio != nil {
+		a.audio.SetOnStarted(nil)
+		a.audio.SetOnEnded(nil)
+	}
 
 	if a.library != nil {
 		a.library.Close()
@@ -414,6 +439,47 @@ func (a *App) shutdown(ctx context.Context) {
 		_ = a.tempo.Close()
 	}
 	_ = a.store.Close()
+}
+
+func (a *App) launchBackground(run func(context.Context)) bool {
+	a.lifecycleMu.Lock()
+	if a.shuttingDown {
+		a.lifecycleMu.Unlock()
+		return false
+	}
+	if a.runCtx == nil {
+		a.runCtx, a.runCancel = context.WithCancel(context.Background())
+	}
+	ctx := a.runCtx
+	a.backgroundWG.Add(1)
+	a.lifecycleMu.Unlock()
+
+	go func() {
+		defer a.backgroundWG.Done()
+		run(ctx)
+	}()
+	return true
+}
+
+func (a *App) stopBackgroundWork() {
+	a.lifecycleMu.Lock()
+	a.shuttingDown = true
+	cancel := a.runCancel
+	a.runCancel = nil
+	a.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+
+	a.reclusterMu.Lock()
+	if a.reclusterTimer != nil {
+		a.reclusterTimer.Stop()
+		a.reclusterTimer = nil
+	}
+	a.reclusterPending = false
+	a.reclusterMu.Unlock()
+
+	a.backgroundWG.Wait()
 }
 
 func (a *App) hydrateQueueItems(queue []rays.QueueItem) []rays.QueueItem {
@@ -782,14 +848,21 @@ func resolveRuntimePath(primary, fallback string) string {
 
 func (a *App) TestONNXRuntime(payload SettingsPayload) RuntimeTestResult {
 	start := time.Now()
-	runtimePath := resolveRuntimePath(payload.OnnxRuntimePath, func() string {
+	configured := resolveRuntimePath(payload.OnnxRuntimePath, func() string {
 		row, err := a.store.GetAppState()
 		if err != nil {
 			return ""
 		}
 		return row.OnnxRuntimePath
 	}())
-	result := RuntimeTestResult{RuntimePath: runtimePath}
+	result := RuntimeTestResult{}
+	runtimePath, err := onnx.ResolveRuntimeLibraryPath(configured)
+	if err != nil {
+		result.Message = err.Error()
+		result.LatencyMS = time.Since(start).Milliseconds()
+		return result
+	}
+	result.RuntimePath = runtimePath
 	if err := onnx.TestRuntime(runtimePath); err != nil {
 		result.Message = err.Error()
 		result.LatencyMS = time.Since(start).Milliseconds()
@@ -803,21 +876,35 @@ func (a *App) TestONNXRuntime(payload SettingsPayload) RuntimeTestResult {
 
 func (a *App) TestMiniLM(payload SettingsPayload) MiniLMTestResult {
 	start := time.Now()
-	runtimePath := resolveRuntimePath(payload.OnnxRuntimePath, func() string {
+	configuredRuntime := resolveRuntimePath(payload.OnnxRuntimePath, func() string {
 		row, err := a.store.GetAppState()
 		if err != nil {
 			return ""
 		}
 		return row.OnnxRuntimePath
 	}())
-	modelDir := strings.TrimSpace(payload.MiniLMModelDir)
-	if modelDir == "" {
+	configuredModelDir := strings.TrimSpace(payload.MiniLMModelDir)
+	if configuredModelDir == "" {
 		row, err := a.store.GetAppState()
 		if err == nil {
-			modelDir = strings.TrimSpace(row.MiniLMModelDir)
+			configuredModelDir = strings.TrimSpace(row.MiniLMModelDir)
 		}
 	}
-	result := MiniLMTestResult{RuntimePath: runtimePath, ModelDir: modelDir}
+	result := MiniLMTestResult{}
+	runtimePath, err := onnx.ResolveRuntimeLibraryPath(configuredRuntime)
+	if err != nil {
+		result.Message = err.Error()
+		result.LatencyMS = time.Since(start).Milliseconds()
+		return result
+	}
+	result.RuntimePath = runtimePath
+	modelDir, err := onnx.ResolveMiniLMModelDir(configuredModelDir)
+	if err != nil {
+		result.Message = err.Error()
+		result.LatencyMS = time.Since(start).Milliseconds()
+		return result
+	}
+	result.ModelDir = modelDir
 	modelPath, tokenizerPath, err := onnx.ResolveModelFiles(modelDir)
 	if err != nil {
 		result.Message = err.Error()
@@ -833,7 +920,9 @@ func (a *App) TestMiniLM(payload SettingsPayload) MiniLMTestResult {
 		return result
 	}
 	defer engine.Close()
-	vec, err := engine.Encode(context.Background(), "ray player model validation")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	vec, err := engine.Encode(ctx, "ray player model validation")
 	if err != nil {
 		result.Message = err.Error()
 		result.LatencyMS = time.Since(start).Milliseconds()
@@ -857,22 +946,36 @@ func (a *App) TestFFmpeg(path string) (string, error) {
 
 func (a *App) TestEssentia(payload SettingsPayload) EssentiaTestResult {
 	start := time.Now()
-	runtimePath := resolveRuntimePath(payload.OnnxRuntimePath, func() string {
+	configuredRuntime := resolveRuntimePath(payload.OnnxRuntimePath, func() string {
 		row, err := a.store.GetAppState()
 		if err != nil {
 			return ""
 		}
 		return row.OnnxRuntimePath
 	}())
-	modelDir := strings.TrimSpace(payload.EssentiaModelDir)
-	if modelDir == "" {
+	configuredModelDir := strings.TrimSpace(payload.EssentiaModelDir)
+	if configuredModelDir == "" {
 		row, err := a.store.GetAppState()
 		if err == nil {
-			modelDir = strings.TrimSpace(row.EssentiaModelDir)
+			configuredModelDir = strings.TrimSpace(row.EssentiaModelDir)
 		}
 	}
-	probe, err := onnx.ProbeEssentia(runtimePath, modelDir)
-	result := EssentiaTestResult{RuntimePath: probe.RuntimePath, ModelDir: probe.ModelsDir, Message: probe.Message}
+	result := EssentiaTestResult{}
+	runtimePath, err := onnx.ResolveRuntimeLibraryPath(configuredRuntime)
+	if err != nil {
+		result.Message = err.Error()
+		result.LatencyMS = time.Since(start).Milliseconds()
+		return result
+	}
+	modelDir, err := onnx.ResolveEssentiaModelDir(configuredModelDir)
+	if err != nil {
+		result.RuntimePath = runtimePath
+		result.Message = err.Error()
+		result.LatencyMS = time.Since(start).Milliseconds()
+		return result
+	}
+	probe, probeErr := onnx.ProbeEssentia(runtimePath, modelDir)
+	result = EssentiaTestResult{RuntimePath: runtimePath, ModelDir: modelDir, Message: probe.Message}
 	result.Base = ModelCheckResult(probe.Base)
 	result.Genre = ModelCheckResult(probe.Genre)
 	result.Heads = make([]ModelCheckResult, 0, len(probe.Heads))
@@ -883,13 +986,13 @@ func (a *App) TestEssentia(payload SettingsPayload) EssentiaTestResult {
 		}
 		result.Heads = append(result.Heads, ModelCheckResult(item))
 	}
-	result.OK = err == nil && result.Base.Loaded && loaded > 0
-	if err != nil && result.Message == "" {
-		result.Message = err.Error()
+	result.OK = probeErr == nil && result.Base.Loaded && result.Genre.Loaded && loaded > 0
+	if probeErr != nil && result.Message == "" {
+		result.Message = probeErr.Error()
 	}
 	result.LatencyMS = time.Since(start).Milliseconds()
 	if result.Message == "" {
-		result.Message = fmt.Sprintf("Essentia base loaded; %d/%d heads loaded", loaded, len(result.Heads))
+		result.Message = fmt.Sprintf("Essentia base+genre loaded; %d/%d heads loaded", loaded, len(result.Heads))
 	}
 	return result
 }
@@ -910,40 +1013,100 @@ func (a *App) SaveSettings(payload SettingsPayload) (BootstrapPayload, error) {
 	if payload.FFprobePath == "" {
 		payload.FFprobePath = analysis.FFprobePath()
 	}
+	newText, newEssentia, newTempo, err := prepareModelEngines(
+		payload.OnnxRuntimePath,
+		payload.MiniLMModelDir,
+		payload.EssentiaModelDir,
+	)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			closeModelEngines(newText, newEssentia, newTempo)
+		}
+	}()
+
 	if err := a.store.SetAppSettings(db.AppStateRow{OnnxRuntimePath: payload.OnnxRuntimePath, MiniLMModelDir: payload.MiniLMModelDir, EssentiaModelDir: payload.EssentiaModelDir, FFmpegPath: payload.FFmpegPath, FFprobePath: payload.FFprobePath, RepeatRay: payload.RepeatRay, ExtendRay: payload.ExtendRay, EmoFlowUIEnabled: payload.EmoFlowUI.Enabled, EmoFlowUIIntensity: payload.EmoFlowUI.Intensity, EmoFlowUIAnimateTrack: payload.EmoFlowUI.AnimateDuringTrack, EmoFlowUIRespectReduced: payload.EmoFlowUI.RespectReducedMotion}); err != nil {
 		return BootstrapPayload{}, err
 	}
-	if a.onnx != nil {
-		_ = a.onnx.Close()
-	}
-	if a.essentia != nil {
-		_ = a.essentia.Close()
-	}
-	if a.tempo != nil {
-		_ = a.tempo.Close()
-	}
-	a.onnx = nil
-	a.essentia = nil
-	a.tempo = nil
-	if payload.MiniLMModelDir != "" {
-		if eng, err := onnx.New(payload.OnnxRuntimePath, payload.MiniLMModelDir); err == nil {
-			a.onnx = eng
-		}
-	}
-	if payload.EssentiaModelDir != "" {
-		if eng, err := onnx.NewEssentiaEngine(payload.OnnxRuntimePath, payload.EssentiaModelDir); err == nil {
-			a.essentia = eng
-		}
-		if eng, err := onnx.NewTempoEngine(payload.OnnxRuntimePath, payload.EssentiaModelDir); err == nil {
-			a.tempo = eng
-		}
-	}
+
+	oldText, oldEssentia, oldTempo := a.onnx, a.essentia, a.tempo
+	a.onnx, a.essentia, a.tempo = newText, newEssentia, newTempo
+	a.library.UpdateEngines(newText, newEssentia, newTempo)
+	committed = true
+	closeModelEngines(oldText, oldEssentia, oldTempo)
+
 	analysis.SetFFmpegPath(payload.FFmpegPath)
 	analysis.SetFFprobePath(payload.FFprobePath)
-	a.library.UpdateEngines(a.onnx, a.essentia, a.tempo)
 	a.pushSnapshot()
 	a.emitEmoFlowUpdate()
 	return a.Bootstrap(), nil
+}
+
+func prepareModelEngines(
+	runtimePath,
+	miniLMConfigured,
+	essentiaConfigured string,
+) (*onnx.Engine, *onnx.EssentiaEngine, *onnx.TempoEngine, error) {
+	miniLMDir, miniErr := onnx.ResolveMiniLMModelDir(miniLMConfigured)
+	if miniErr != nil && strings.TrimSpace(miniLMConfigured) != "" {
+		return nil, nil, nil, miniErr
+	}
+	if miniErr != nil {
+		miniLMDir = ""
+	}
+	essentiaDir, essentiaErr := onnx.ResolveEssentiaModelDir(essentiaConfigured)
+	if essentiaErr != nil && strings.TrimSpace(essentiaConfigured) != "" {
+		return nil, nil, nil, essentiaErr
+	}
+	if essentiaErr != nil {
+		essentiaDir = ""
+	}
+
+	var text *onnx.Engine
+	var essentiaEngine *onnx.EssentiaEngine
+	var tempoEngine *onnx.TempoEngine
+	cleanup := func() { closeModelEngines(text, essentiaEngine, tempoEngine) }
+
+	var err error
+	if miniLMDir != "" {
+		text, err = onnx.New(runtimePath, miniLMDir)
+		if err != nil {
+			cleanup()
+			return nil, nil, nil, fmt.Errorf("load MiniLM: %w", err)
+		}
+	}
+	if essentiaDir != "" {
+		essentiaEngine, err = onnx.NewEssentiaEngine(runtimePath, essentiaDir)
+		if err != nil {
+			cleanup()
+			return nil, nil, nil, fmt.Errorf("load Essentia: %w", err)
+		}
+		tempoEngine, err = onnx.NewTempoEngine(runtimePath, essentiaDir)
+		if err != nil {
+			cleanup()
+			return nil, nil, nil, fmt.Errorf("load tempo model: %w", err)
+		}
+	}
+	return text, essentiaEngine, tempoEngine, nil
+}
+
+func closeModelEngines(
+	text *onnx.Engine,
+	essentiaEngine *onnx.EssentiaEngine,
+	tempoEngine *onnx.TempoEngine,
+) {
+	if text != nil {
+		_ = text.Close()
+	}
+	if essentiaEngine != nil {
+		_ = essentiaEngine.Close()
+	}
+	if tempoEngine != nil {
+		_ = tempoEngine.Close()
+	}
 }
 
 func (a *App) DebugReindexLibrary() DebugReindexResult {
@@ -956,13 +1119,9 @@ func (a *App) DebugReindexLibrary() DebugReindexResult {
 	a.reindexMu.Unlock()
 
 	tracks := a.library.AllTracks()
-	reindexCtx := a.ctx
-	if reindexCtx == nil {
-		reindexCtx = context.Background()
-	}
 	result := DebugReindexResult{Started: true, Busy: true, Total: len(tracks), Message: fmt.Sprintf("reindex queued: %d tracks", len(tracks))}
 	appLog.I("debug reindex requested total=%d ctxNil=%t", len(tracks), a.ctx == nil)
-	go func(ctx context.Context, total int) {
+	started := a.launchBackground(func(ctx context.Context) {
 		defer func() {
 			a.reindexMu.Lock()
 			a.reindexRunning = false
@@ -971,7 +1130,7 @@ func (a *App) DebugReindexLibrary() DebugReindexResult {
 		if err := ctx.Err(); err != nil {
 			appLog.I("reindex aborted before start err=%v", err)
 			if a.ctx != nil {
-				wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": false, "message": err.Error(), "total": total})
+				wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": false, "message": err.Error(), "total": len(tracks)})
 			}
 			return
 		}
@@ -985,24 +1144,30 @@ func (a *App) DebugReindexLibrary() DebugReindexResult {
 		if err != nil {
 			appLog.I("reindex failed err=%v", err)
 			if a.ctx != nil {
-				wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": false, "message": err.Error(), "total": total})
+				wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": false, "message": err.Error(), "total": len(tracks)})
 			}
 			return
 		}
 		if err := ctx.Err(); err != nil {
 			appLog.I("reindex cancelled after rebuild err=%v", err)
 			if a.ctx != nil {
-				wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": false, "message": err.Error(), "total": total})
+				wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": false, "message": err.Error(), "total": len(tracks)})
 			}
 			return
 		}
 		a.RunReclusterSingleflight()
 		a.pushSnapshot()
 		if a.ctx != nil {
-			wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": true, "message": fmt.Sprintf("reindexed %d tracks", total), "total": total})
+			wruntime.EventsEmit(a.ctx, "app:reindex:done", map[string]any{"ok": true, "message": fmt.Sprintf("reindexed %d tracks", len(tracks)), "total": len(tracks)})
 		}
-		appLog.I("debug reindex complete total=%d", total)
-	}(reindexCtx, len(tracks))
+		appLog.I("debug reindex complete total=%d", len(tracks))
+	})
+	if !started {
+		a.reindexMu.Lock()
+		a.reindexRunning = false
+		a.reindexMu.Unlock()
+		return DebugReindexResult{Started: false, Busy: false, Total: len(tracks), Message: "application is shutting down"}
+	}
 	return result
 }
 
@@ -2353,7 +2518,7 @@ func (a *App) SetVolumePreview(volume float64) appstate.PlayerState {
 		st.Muted = false
 		st.LastNonZeroVolume = volume
 	}
-	a.state.Replace(st)
+	a.state.ReplaceTransient(st)
 	a.pushSnapshot()
 	return st
 }
@@ -2747,13 +2912,25 @@ func (a *App) setPlaybackError(
 }
 
 func (a *App) ScheduleRecluster() {
+	a.lifecycleMu.Lock()
+	stopping := a.shuttingDown
+	a.lifecycleMu.Unlock()
+	if stopping {
+		return
+	}
+
 	a.reclusterMu.Lock()
 	defer a.reclusterMu.Unlock()
 	if a.reclusterTimer != nil {
 		a.reclusterTimer.Stop()
 	}
 	a.reclusterTimer = time.AfterFunc(5*time.Second, func() {
-		a.RunReclusterSingleflight()
+		a.launchBackground(func(ctx context.Context) {
+			if ctx.Err() != nil {
+				return
+			}
+			a.RunReclusterSingleflight()
+		})
 	})
 }
 
@@ -3265,11 +3442,16 @@ func (a *App) logCurrentSkip(source string) {
 	a.rewardCurrentQueueItem(eventType, reward)
 }
 
-func (a *App) playbackTicker() {
+func (a *App) playbackTicker(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	lastPersist := time.Now()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 		st := a.state.Get()
 		if !st.Playing || st.CurrentTrackID == "" {
 			continue

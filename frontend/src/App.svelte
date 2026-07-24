@@ -32,6 +32,11 @@ import SettingsSwitch from "./components/SettingsSwitch.svelte";
 import { api } from "./lib/api";
 import { isPodcastItemId } from "./lib/mediaIdentity";
 import {
+	hasPlaybackSelection,
+	resolvePlayerTitle,
+	resolveVisualMode,
+} from "./lib/playerUi";
+import {
 	externalDownloads,
 	putExternalDownload,
 	mergedDownloadState,
@@ -51,6 +56,7 @@ import {
 	VolumeX,
 	Repeat,
 	FolderPlus,
+	FilePlus2,
 	Sparkles,
 	ListMusic,
 	X,
@@ -1622,10 +1628,7 @@ $: if (libraryMode === "podcast" && query.trim() === "") {
 
 $: playingPodcast = isPodcastItemId(playback.currentTrackId);
 
-$: visualMode =
-	libraryMode === "podcast" || playingPodcast ? "podcast" : "music";
-
-$: effectivePlaybackMode = playingPodcast ? "podcast" : "music";
+$: visualMode = resolveVisualMode(libraryMode);
 
 $: currentPodcast = playingPodcast
 	? (appState.podcasts || []).find(
@@ -1633,10 +1636,13 @@ $: currentPodcast = playingPodcast
 		) || null
 	: null;
 
-$: playerTitle =
-	currentPodcast?.title ||
-	playback.currentTitle ||
-	"Нажмите Play, чтобы продолжить";
+$: playbackSelection = hasPlaybackSelection(playback, currentPodcast);
+
+$: playerTitle = resolvePlayerTitle({
+	libraryMode,
+	playback,
+	currentPodcast,
+});
 
 $: playerArtist =
 	currentPodcast?.author ||
@@ -1742,7 +1748,7 @@ $: playerSubline = playingPodcast
                     <Link size={17} strokeWidth={1.8} />
                 </button>
                 <button class="side-action add-file-button" type="button" on:click={addFiles}
-                    ><FolderPlus size={16} strokeWidth={1.8} /> Добавить {libraryMode === "podcast" ? "выпуск" : "файл"}</button
+                    ><FilePlus2 size={16} strokeWidth={1.8} /> Добавить {libraryMode === "podcast" ? "выпуск" : "файл"}</button
                 >
             </div>
         </div>
@@ -2607,7 +2613,7 @@ $: playerSubline = playingPodcast
 
             <div class="transport">
                 <div class="controls"><IconButton className={`control-btn ${settingsPayload.repeatRay ? "active accent-reactive" : ""}`} title="Repeat ray" on:click={toggleRepeatRay}><Repeat size={18} strokeWidth={1.8} /></IconButton>
-                    <IconButton className="control-btn" title="Previous" on:click={playPrevious}><SkipBack size={18} strokeWidth={1.8} /></IconButton>
+                    <IconButton className="control-btn" title="Previous" disabled={!playbackSelection} on:click={playPrevious}><SkipBack size={18} strokeWidth={1.8} /></IconButton>
                     <UIButton
                         primary
                         className={`play-btn ${
@@ -2615,7 +2621,8 @@ $: playerSubline = playingPodcast
                                 ? "loading"
                                 : ""
                         }`}
-                        on:click={togglePause}
+                         disabled={!playbackSelection}
+                         on:click={togglePause}
                     >
                         {#if playback.status === "loading"}
                             <LoaderCircle
@@ -2628,11 +2635,11 @@ $: playerSubline = playingPodcast
                             <Play size={18} strokeWidth={2} />
                         {/if}
                     </UIButton>
-                    <IconButton className="control-btn" title="Next" on:click={playNext}><SkipForward size={18} strokeWidth={1.8} /></IconButton>
+                    <IconButton className="control-btn" title="Next" disabled={!playbackSelection} on:click={playNext}><SkipForward size={18} strokeWidth={1.8} /></IconButton>
                 </div>
                 <div class="seek">
                     <span>{currentTrack.positionLabel || "0:00"}</span>
-                    <UISlider value={seekValue / 100} min={0} max={1} step={0.01} showValue={false} accentReactive={$indexingState.isIndexing} on:preview={(e) => previewSeek(e.detail)} on:commit={(e) => commitSeek(e.detail)} />
+                    <UISlider value={seekValue / 100} min={0} max={1} step={0.01} showValue={false} disabled={!playbackSelection} accentReactive={$indexingState.isIndexing} on:preview={(e) => previewSeek(e.detail)} on:commit={(e) => commitSeek(e.detail)} />
                     <span>{currentTrack.durationLabel || "0:00"}</span>
                 </div>
             </div>

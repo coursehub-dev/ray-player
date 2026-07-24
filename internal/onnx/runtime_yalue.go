@@ -20,7 +20,7 @@ func AcquireEnvironment() error {
 }
 
 func AcquireEnvironmentWithPath(runtimePath string) error {
-	libraryPath, err := resolveRuntimeLibraryWithOverride(runtimePath)
+	libraryPath, err := ResolveRuntimeLibraryPath(runtimePath)
 	if err != nil {
 		return err
 	}
@@ -49,20 +49,6 @@ func AcquireEnvironmentWithPath(runtimePath string) error {
 	environmentReferences = 1
 	environmentLibraryPath = libraryPath
 	return nil
-}
-
-func resolveRuntimeLibraryWithOverride(runtimePath string) (string, error) {
-	if runtimePath != "" {
-		path, err := filepath.Abs(runtimePath)
-		if err != nil {
-			return "", err
-		}
-		if !isRegularFile(path) {
-			return "", fmt.Errorf("runtime library missing: %s", path)
-		}
-		return path, nil
-	}
-	return ResolveRuntimeLibrary()
 }
 
 func ReleaseEnvironment() error {

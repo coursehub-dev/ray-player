@@ -138,3 +138,69 @@ func TestWriteReaderAtomicallyReplacesCorruptDestination(t *testing.T) {
 		t.Fatalf("destination=%q want runtime", data)
 	}
 }
+
+func TestCopyWithLimitRejectsOversizedPayload(t *testing.T) {
+	var dst strings.Builder
+	if _, err := copyWithLimit(&dst, strings.NewReader("12345"), 4); err == nil {
+		t.Fatal("expected oversized payload error")
+	}
+}
+
+func TestValidateJSONFileRejectsCorruptFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tokenizer.json")
+	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateJSONFile(path); err == nil {
+		t.Fatal("expected invalid JSON error")
+	}
+	if err := os.WriteFile(path, []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateJSONFile(path); err != nil {
+		t.Fatalf("valid JSON rejected: %v", err)
+	}
+}
+
+func TestStageAssetsRootMatchesBundleLayout(t *testing.T) {
+	buildDir := filepath.Join("build", "bin")
+	mac := stageAssetsRoot("darwin", buildDir, "ray-player1")
+	wantMac := filepath.Join(buildDir, "ray-player1.app", "Contents", "Resources", "assets")
+	if mac != wantMac {
+		t.Fatalf("darwin root=%q want=%q", mac, wantMac)
+	}
+	windows := stageAssetsRoot("windows", buildDir, "ray-player1")
+	wantWindows := filepath.Join(buildDir, "assets")
+	if windows != wantWindows {
+		t.Fatalf("windows root=%q want=%q", windows, wantWindows)
+	}
+}
+
+func TestCopyTreeFiltersEssentiaSourceArtifacts(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "src")
+	dst := filepath.Join(t.TempDir(), "dst")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"model.onnx": "onnx",
+		"model.json": "{}",
+		"model.pb":   "tensorflow",
+	} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := copyTree(src, dst, func(path string) bool {
+		ext := strings.ToLower(filepath.Ext(path))
+		return ext == ".onnx" || ext == ".json"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !regularFile(filepath.Join(dst, "model.onnx")) || !regularFile(filepath.Join(dst, "model.json")) {
+		t.Fatal("expected ONNX and JSON files to be staged")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "model.pb")); !os.IsNotExist(err) {
+		t.Fatalf("TensorFlow source artifact should not be staged, err=%v", err)
+	}
+}

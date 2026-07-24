@@ -179,6 +179,7 @@ type EssentiaEngine struct {
 	genreClasses        []string
 	headMap             map[string]*essentiaHead
 	discogs             *DynamicMultiOutputFloatModel
+	environmentHeld     bool
 
 	baseModelPath  string
 	genreModelPath string
@@ -242,6 +243,7 @@ func NewEssentiaEngine(runtimePath, modelsDir string) (*EssentiaEngine, error) {
 	baseOutputs := base.OutputNames()
 	engine := &EssentiaEngine{
 		rt:                  rt,
+		environmentHeld:     true,
 		env:                 env,
 		base:                base,
 		baseInput:           pickSessionInput(baseInputs, "serving_default_melspectrogram:0", "serving_default_melspectrogram", "melspectrogram"),
@@ -252,6 +254,10 @@ func NewEssentiaEngine(runtimePath, modelsDir string) (*EssentiaEngine, error) {
 		baseModelPath:       basePath,
 		genreModelPath:      filepath.Join(modelsDir, "genre_discogs400-discogs-effnet-1.onnx"),
 	}
+	// From this point the engine owns the acquired environment reference.
+	// Constructor failures must close the engine exactly once instead of also
+	// firing the deferred pre-construction cleanup.
+	cleanupEnv = false
 	engine.baseOutput = engine.baseEmbeddingOutput
 	essentiaLog.I("base loaded input=%q genreOutput=%q embeddingOutput=%q inputs=%v outputs=%v", engine.baseInput, engine.baseGenreOutput, engine.baseEmbeddingOutput, baseInputs, baseOutputs)
 
@@ -356,7 +362,6 @@ func NewEssentiaEngine(runtimePath, modelsDir string) (*EssentiaEngine, error) {
 		}
 	}
 
-	cleanupEnv = false
 	return engine, nil
 }
 
@@ -593,9 +598,6 @@ func (e *EssentiaEngine) Close() error {
 	defer e.lifeMu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.readyLocked() && e.discogs == nil {
-		return nil
-	}
 	if e.discogs != nil {
 		_ = e.discogs.Close()
 		e.discogs = nil
@@ -622,6 +624,10 @@ func (e *EssentiaEngine) Close() error {
 		_ = e.rt.Close()
 		e.rt = nil
 	}
+	if !e.environmentHeld {
+		return nil
+	}
+	e.environmentHeld = false
 	return ReleaseEnvironment()
 }
 

@@ -8,7 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"format": "npx biome format --write .",
-		"test": "node --test src/stores/emoflow.test.js"
+		"test": "node --test"
 	},
 	"dependencies": {
 		"lucide-svelte": "^1.0.1",

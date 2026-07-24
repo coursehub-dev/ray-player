@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"ray-player1/internal/appstate"
 	"ray-player1/internal/rays"
@@ -166,5 +167,43 @@ func TestPodcastIDIsNotMusicPlayback(t *testing.T) {
 		"podcast_35e53eae4704e19af844b851",
 	); got != currentPlaybackPodcast {
 		t.Fatalf("kind = %q, want podcast", got)
+	}
+}
+
+func TestPlaybackTickerStopsWhenContextIsCanceled(t *testing.T) {
+	app := &App{state: appstate.NewStore(nil)}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		app.playbackTicker(ctx)
+		close(done)
+	}()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("playback ticker did not stop after cancellation")
+	}
+}
+
+func TestBackgroundLifecycleRejectsNewWorkAfterStop(t *testing.T) {
+	app := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	app.runCtx = ctx
+	app.runCancel = cancel
+
+	started := make(chan struct{})
+	if !app.launchBackground(func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+	}) {
+		t.Fatal("expected background work to start")
+	}
+	<-started
+	app.stopBackgroundWork()
+
+	if app.launchBackground(func(context.Context) {}) {
+		t.Fatal("background work must be rejected after shutdown begins")
 	}
 }
