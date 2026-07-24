@@ -63,7 +63,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ci-artifact-smoke
           path: downloaded
