@@ -24,9 +24,7 @@ export const mergeDoctorPatch = (settings = {}, patch = {}) => ({
 	...settings,
 	...(patch.onnxRuntimePath ? { onnxRuntimePath: patch.onnxRuntimePath } : {}),
 	...(patch.miniLMModelDir ? { miniLMModelDir: patch.miniLMModelDir } : {}),
-	...(patch.essentiaModelDir
-		? { essentiaModelDir: patch.essentiaModelDir }
-		: {}),
+	...(patch.essentiaModelDir ? { essentiaModelDir: patch.essentiaModelDir } : {}),
 	...(patch.ffmpegPath ? { ffmpegPath: patch.ffmpegPath } : {}),
 	...(patch.ffprobePath ? { ffprobePath: patch.ffprobePath } : {}),
 });

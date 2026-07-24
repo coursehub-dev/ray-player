@@ -3,10 +3,7 @@ import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 import { api } from "../lib/api";
 import { emoFlowState, syncEmoFlowFromPayload } from "./emoflow";
 import { isPodcastItemId } from "../lib/mediaIdentity";
-import {
-	bindExternalDownloadEvents,
-	unbindExternalDownloadEvents,
-} from "./externalDownloads";
+import { bindExternalDownloadEvents, unbindExternalDownloadEvents } from "./externalDownloads";
 
 export const screen = writable("search");
 export const state = writable({
@@ -159,8 +156,7 @@ export function bindSnapshotEvents() {
 			syncEmoFlowFromPayload(payload);
 			indexingState.update((prev) => ({
 				...prev,
-				libraryCount:
-					payload.libraryStat?.tracks || payload.library?.length || 0,
+				libraryCount: payload.libraryStat?.tracks || payload.library?.length || 0,
 			}));
 		}
 	});
@@ -218,9 +214,7 @@ export function bindSnapshotEvents() {
 		showToast({
 			type: "warning",
 			title: "Не удалось воспроизвести файл",
-			message: payload?.title
-				? `${payload.title} — пробую следующий`
-				: "Пробую следующий трек",
+			message: payload?.title ? `${payload.title} — пробую следующий` : "Пробую следующий трек",
 			duration: 2800,
 		});
 	});
@@ -254,8 +248,7 @@ export function bindReindexEvents() {
 			total: payload?.total || 0,
 			stage: "done",
 			state: payload?.ok ? "ok" : "error",
-			message:
-				payload?.message || (payload?.ok ? "Reindex done" : "Reindex failed"),
+			message: payload?.message || (payload?.ok ? "Reindex done" : "Reindex failed"),
 			trackId: "",
 			path: "",
 		});

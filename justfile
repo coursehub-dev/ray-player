@@ -53,10 +53,10 @@ format:
     gofmt -w $(git ls-files '*.go')
     npm --prefix frontend run format
 
-# Немутабельная проверка форматирования для CI и pre-commit.
+# Немутабельная проверка Go formatting и frontend format/lint.
 format-check:
     ./scripts/check-go-format.sh
-    npm --prefix frontend run check
+    ./scripts/check-frontend-quality.sh
 
 # Подключить безопасный локальный hook без npm install и сетевых действий.
 hooks:

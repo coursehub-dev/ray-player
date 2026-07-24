@@ -21,8 +21,7 @@ $: if (!dragging) localValue = Number(value) || 0;
 $: clamped = Math.max(min, Math.min(max, Number(localValue) || 0));
 $: ratio = max > min ? (clamped - min) / (max - min) : 0;
 $: fillPercent = ratio * 100;
-$: displayValue =
-	format === "percent" ? `${Math.round(ratio * 100)}%` : String(clamped);
+$: displayValue = format === "percent" ? `${Math.round(ratio * 100)}%` : String(clamped);
 
 function valueFromPointer(event) {
 	const rect = trackEl.getBoundingClientRect();

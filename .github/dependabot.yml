@@ -28,6 +28,13 @@ updates:
         update-types:
           - minor
           - patch
+      frontend-quality-tooling:
+        applies-to: version-updates
+        patterns:
+          - "@biomejs/biome"
+        update-types:
+          - minor
+          - patch
       npm-minor-and-patch:
         applies-to: version-updates
         patterns:
@@ -36,6 +43,7 @@ updates:
           - "svelte"
           - "@sveltejs/vite-plugin-svelte"
           - "vite"
+          - "@biomejs/biome"
         update-types:
           - minor
           - patch
@@ -47,6 +55,9 @@ updates:
         update-types:
           - "version-update:semver-major"
       - dependency-name: "vite"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@biomejs/biome"
         update-types:
           - "version-update:semver-major"
   - package-ecosystem: github-actions

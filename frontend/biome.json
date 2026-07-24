@@ -1,13 +1,7 @@
 {
 	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
 	"files": {
-		"includes": [
-			"src/**",
-			"index.html",
-			"jsconfig.json",
-			"package.json",
-			"vite.config.js"
-		],
+		"includes": ["src/**", "index.html", "jsconfig.json", "package.json", "svelte.config.js", "vite.config.js"],
 		"ignoreUnknown": true
 	},
 	"formatter": {

@@ -77,33 +77,23 @@ export const trackProgress = derived(playback, ($p) => {
 	return clamp01($p.position / $p.duration);
 });
 
-export const activePalette = derived(
-	[emoFlowState, emoFlowSettings, trackProgress],
-	([$emo, $settings, $progress]) => {
-		if (!$settings.enabled) return DEFAULT_PALETTE;
-		const current = $emo.current?.palette || $emo.palette || DEFAULT_PALETTE;
-		const next = $emo.next?.palette || current;
-		if (!$settings.animateDuringTrack) {
-			return mixPalette(DEFAULT_PALETTE, current, $settings.intensity);
-		}
-		const interpolated = interpolateTrackPalette(current, next, $progress);
-		return mixPalette(
-			DEFAULT_PALETTE,
-			interpolated,
-			clamp01($settings.intensity),
-		);
-	},
-);
+export const activePalette = derived([emoFlowState, emoFlowSettings, trackProgress], ([$emo, $settings, $progress]) => {
+	if (!$settings.enabled) return DEFAULT_PALETTE;
+	const current = $emo.current?.palette || $emo.palette || DEFAULT_PALETTE;
+	const next = $emo.next?.palette || current;
+	if (!$settings.animateDuringTrack) {
+		return mixPalette(DEFAULT_PALETTE, current, $settings.intensity);
+	}
+	const interpolated = interpolateTrackPalette(current, next, $progress);
+	return mixPalette(DEFAULT_PALETTE, interpolated, clamp01($settings.intensity));
+});
 
-export const activeMotion = derived(
-	[emoFlowState, emoFlowSettings],
-	([$emo, $settings]) => {
-		if (!$settings.enabled) return DEFAULT_MOTION;
-		const vector = $emo.current?.vector || $emo.vector;
-		if (!vector) return DEFAULT_MOTION;
-		return computeMotion(vector, $emo.direction, $settings);
-	},
-);
+export const activeMotion = derived([emoFlowState, emoFlowSettings], ([$emo, $settings]) => {
+	if (!$settings.enabled) return DEFAULT_MOTION;
+	const vector = $emo.current?.vector || $emo.vector;
+	if (!vector) return DEFAULT_MOTION;
+	return computeMotion(vector, $emo.direction, $settings);
+});
 
 export const cssVariables = derived(
 	[activePalette, activeMotion, emoFlowSettings],
@@ -129,9 +119,7 @@ export const cssVariables = derived(
 
 export function mergeEmoFlowState(state, nextState) {
 	const normalized = nextState ? normalizeMoodForColor(nextState) : nextState;
-	const palette = normalized?.palette?.accent
-		? normalized.palette
-		: state?.palette || DEFAULT_PALETTE;
+	const palette = normalized?.palette?.accent ? normalized.palette : state?.palette || DEFAULT_PALETTE;
 	const merged = {
 		...(state || {}),
 		...normalized,
@@ -140,9 +128,7 @@ export function mergeEmoFlowState(state, nextState) {
 	};
 	const previousCurrent = state?.current || null;
 	const nextCurrent = normalized?.current || null;
-	const sameCurrentTrack =
-		Boolean(previousCurrent?.trackId) &&
-		previousCurrent?.trackId === nextCurrent?.trackId;
+	const sameCurrentTrack = Boolean(previousCurrent?.trackId) && previousCurrent?.trackId === nextCurrent?.trackId;
 
 	merged.current = normalized?.current
 		? {
@@ -151,12 +137,8 @@ export function mergeEmoFlowState(state, nextState) {
 				palette: normalized.current.palette || palette,
 			}
 		: state?.current || null;
-	const hasPrevious =
-		Boolean(normalized) &&
-		Object.prototype.hasOwnProperty.call(normalized, "previous");
-	const hasNext =
-		Boolean(normalized) &&
-		Object.prototype.hasOwnProperty.call(normalized, "next");
+	const hasPrevious = Boolean(normalized) && Object.prototype.hasOwnProperty.call(normalized, "previous");
+	const hasNext = Boolean(normalized) && Object.prototype.hasOwnProperty.call(normalized, "next");
 	merged.previous = normalized?.previous
 		? {
 				...(sameCurrentTrack ? state?.previous || {} : {}),
@@ -196,12 +178,7 @@ function normalizeMoodForColor(mood) {
 	const intensity = clamp01(mood?.intensity ?? 0);
 	const melancholy = clamp01(mood?.melancholy ?? 0);
 	const darkByValence = clamp01((0.45 - valence) / 0.45);
-	const sad = clamp01(
-		((sadRaw - 0.65) / 0.35) * 0.35 +
-			melancholy * 0.3 +
-			darkByValence * 0.25 -
-			drive * 0.25,
-	);
+	const sad = clamp01(((sadRaw - 0.65) / 0.35) * 0.35 + melancholy * 0.3 + darkByValence * 0.25 - drive * 0.25);
 	return {
 		...mood,
 		energy,
@@ -220,15 +197,9 @@ function normalizeMoodForColor(mood) {
 }
 
 function computeMotion(vector, direction, settings) {
-	const pulse = clamp01(
-		0.25 + 0.45 * (vector.energy || 0) + 0.35 * (vector.aggression || 0),
-	);
-	const breathing = clamp01(
-		0.65 * (vector.calmness || 0) + 0.35 * (vector.melodicness || 0),
-	);
-	const sharpness = clamp01(
-		0.6 * (vector.aggression || 0) + 0.4 * (vector.engagement || 0),
-	);
+	const pulse = clamp01(0.25 + 0.45 * (vector.energy || 0) + 0.35 * (vector.aggression || 0));
+	const breathing = clamp01(0.65 * (vector.calmness || 0) + 0.35 * (vector.melodicness || 0));
+	const sharpness = clamp01(0.6 * (vector.aggression || 0) + 0.4 * (vector.engagement || 0));
 	const reduced = settings.respectReducedMotion && prefersReducedMotion();
 	let motion = {
 		pulseSpeed: lerp(10, 3, pulse),
@@ -293,10 +264,7 @@ function mixPalette(a, b, t) {
 		ring: mixColor(a.ring || a.glow, b.ring || b.glow, t),
 		progress: mixColor(a.progress, b.progress, t),
 		icon: mixColor(a.icon, b.icon, t),
-		accentOn:
-			t < 0.5
-				? a.accentOn || DEFAULT_PALETTE.accentOn
-				: b.accentOn || DEFAULT_PALETTE.accentOn,
+		accentOn: t < 0.5 ? a.accentOn || DEFAULT_PALETTE.accentOn : b.accentOn || DEFAULT_PALETTE.accentOn,
 	};
 }
 
@@ -351,10 +319,7 @@ function toOKLCHString(color) {
 }
 
 function prefersReducedMotion() {
-	return Boolean(
-		globalThis?.window?.matchMedia?.("(prefers-reduced-motion: reduce)")
-			?.matches,
-	);
+	return Boolean(globalThis?.window?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
 }
 
 function lerp(a, b, t) {

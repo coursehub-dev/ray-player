@@ -15,11 +15,7 @@ import {
 	syncPayload,
 	unbindSnapshotEvents,
 } from "./stores/app";
-import {
-	cssVariables,
-	emoFlowState,
-	syncEmoFlowFromPayload,
-} from "./stores/emoflow";
+import { cssVariables, emoFlowState, syncEmoFlowFromPayload } from "./stores/emoflow";
 import IconButton from "./components/IconButton.svelte";
 import UIButton from "./components/UIButton.svelte";
 import UISlider from "./components/UISlider.svelte";
@@ -32,16 +28,8 @@ import DoctorModal from "./components/DoctorModal.svelte";
 import SettingsSwitch from "./components/SettingsSwitch.svelte";
 import { api } from "./lib/api";
 import { isPodcastItemId } from "./lib/mediaIdentity";
-import {
-	hasPlaybackSelection,
-	resolvePlayerTitle,
-	resolveVisualMode,
-} from "./lib/playerUi";
-import {
-	externalDownloads,
-	putExternalDownload,
-	mergedDownloadState,
-} from "./stores/externalDownloads";
+import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./lib/playerUi";
+import { externalDownloads, putExternalDownload, mergedDownloadState } from "./stores/externalDownloads";
 import {
 	Search,
 	History,
@@ -146,21 +134,10 @@ let volumeMuteBusy = false;
 
 // displayedVolume: во время drag показывает preview,
 // при mute показывает 0, иначе — реальную громкость.
-$: displayedVolume =
-	volumePreview !== null
-		? volumePreview
-		: appState.current?.muted
-			? 0
-			: volumeValue;
+$: displayedVolume = volumePreview !== null ? volumePreview : appState.current?.muted ? 0 : volumeValue;
 
 $: volumeIconLevel =
-	displayedVolume <= 0
-		? "muted"
-		: displayedVolume < 0.34
-			? "low"
-			: displayedVolume < 0.67
-				? "medium"
-				: "high";
+	displayedVolume <= 0 ? "muted" : displayedVolume < 0.34 ? "low" : displayedVolume < 0.67 ? "medium" : "high";
 let podcastRayUpdating = false;
 let draggedPodcastRayIndex = -1;
 let podcastRayDropIndex = -1;
@@ -239,9 +216,7 @@ let externalSettingsSaving = false;
 
 let libraryPlayRequestSeq = 0;
 
-$: emoFlowIntensityPercent = Math.round(
-	(settingsPayload.emoFlowUi?.intensity ?? 1) * 100,
-);
+$: emoFlowIntensityPercent = Math.round((settingsPayload.emoFlowUi?.intensity ?? 1) * 100);
 const setEmoFlowIntensityPercent = (val) => {
 	if (!settingsPayload.emoFlowUi) settingsPayload.emoFlowUi = {};
 	settingsPayload.emoFlowUi.intensity = Math.max(0, Math.min(1, val / 100));
@@ -249,17 +224,9 @@ const setEmoFlowIntensityPercent = (val) => {
 
 const probeLabel = (probe) => {
 	if (!probe) return "";
-	const input =
-		Array.isArray(probe.inputShape) && probe.inputShape.length
-			? probe.inputShape.join("×")
-			: "";
-	const output =
-		Array.isArray(probe.outputShape) && probe.outputShape.length
-			? probe.outputShape.join("×")
-			: "";
-	return [probe.inputName, input, "→", probe.outputName, output]
-		.filter(Boolean)
-		.join(" ");
+	const input = Array.isArray(probe.inputShape) && probe.inputShape.length ? probe.inputShape.join("×") : "";
+	const output = Array.isArray(probe.outputShape) && probe.outputShape.length ? probe.outputShape.join("×") : "";
+	return [probe.inputName, input, "→", probe.outputName, output].filter(Boolean).join(" ");
 };
 
 const unsubscribeState = state.subscribe((v) => {
@@ -273,15 +240,7 @@ const unsubscribeState = state.subscribe((v) => {
 	if (!seekInFlight) {
 		const duration = incomingDuration || stableDurationMs;
 		seekValue =
-			duration > 0
-				? Math.max(
-						0,
-						Math.min(
-							100,
-							Math.round(((v.current?.positionMs || 0) / duration) * 100),
-						),
-					)
-				: 0;
+			duration > 0 ? Math.max(0, Math.min(100, Math.round(((v.current?.positionMs || 0) / duration) * 100))) : 0;
 	}
 
 	// При mute используем LastNonZeroVolume чтобы slider вернулся
@@ -308,10 +267,7 @@ const searchCurrentLibrary = async (value = query) => {
 	query = value;
 
 	if (libraryMode === "podcast") {
-		podcastResults =
-			value.trim() === ""
-				? [...(appState.podcasts || [])]
-				: await api.searchPodcasts(value);
+		podcastResults = value.trim() === "" ? [...(appState.podcasts || [])] : await api.searchPodcasts(value);
 		return;
 	}
 
@@ -356,11 +312,9 @@ const setLibraryMode = async (mode) => {
 	}
 };
 
-const toggleLibraryMode = () =>
-	setLibraryMode(libraryMode === "podcast" ? "music" : "podcast");
+const toggleLibraryMode = () => setLibraryMode(libraryMode === "podcast" ? "music" : "podcast");
 
-const podcastMeta = (item) =>
-	[item.series || item.author, item.folder].filter(Boolean).join(" · ");
+const podcastMeta = (item) => [item.series || item.author, item.folder].filter(Boolean).join(" · ");
 
 const podcastProgress = (item) => {
 	if (!item) {
@@ -381,8 +335,7 @@ const podcastProgress = (item) => {
 	return Math.max(0, Math.min(1, position / duration));
 };
 
-const podcastProgressPercent = (item) =>
-	Math.round(podcastProgress(item) * 100);
+const podcastProgressPercent = (item) => Math.round(podcastProgress(item) * 100);
 
 const externalState = (item) => mergedDownloadState($externalDownloads, item);
 
@@ -409,9 +362,7 @@ const externalStatusLabel = (item) => {
 		case "canceled":
 			return "Загрузка отменена";
 		case "ready":
-			return item?.analysisStatus === "pending"
-				? "Скачано · анализируется"
-				: "";
+			return item?.analysisStatus === "pending" ? "Скачано · анализируется" : "";
 		default:
 			return "";
 	}
@@ -440,11 +391,9 @@ const podcastHistorySourceLabel = (source) => {
 	}
 };
 
-const podcastRayContentLabel = (mode) =>
-	podcastContentLabels[mode] || "Рекомендуемое";
+const podcastRayContentLabel = (mode) => podcastContentLabels[mode] || "Рекомендуемое";
 
-const podcastRaySortLabel = (mode) =>
-	podcastSortLabels[mode] || "Рекомендуемое";
+const podcastRaySortLabel = (mode) => podcastSortLabels[mode] || "Рекомендуемое";
 
 const openPodcastRayHistory = async (rayId) => {
 	await syncPayload(api.openPodcastRayHistory(rayId));
@@ -515,9 +464,7 @@ const setPodcastContentMode = async (mode) => {
 
 	if (
 		appState.podcastRay?.isManualOrder &&
-		!window.confirm(
-			"Смена наполнения пересоберёт луч и сбросит ручной порядок. Продолжить?",
-		)
+		!window.confirm("Смена наполнения пересоберёт луч и сбросит ручной порядок. Продолжить?")
 	) {
 		return;
 	}
@@ -553,9 +500,7 @@ const playPodcast = async (itemId, fromRay = false) => {
 		return;
 	}
 
-	const payload = fromRay
-		? await api.playPodcastRayItem(itemId)
-		: await api.playPodcast(itemId);
+	const payload = fromRay ? await api.playPodcastRayItem(itemId) : await api.playPodcast(itemId);
 	await syncPayload(Promise.resolve(payload));
 	podcastResults = [...(appState.podcasts || [])];
 	setScreen("ray");
@@ -658,9 +603,7 @@ const dropMusicRayItem = async (event, index) => {
 	event.preventDefault();
 	event.stopPropagation();
 
-	const trackId =
-		event.dataTransfer.getData("application/x-music-ray-track") ||
-		draggedMusicTrackId;
+	const trackId = event.dataTransfer.getData("application/x-music-ray-track") || draggedMusicTrackId;
 
 	const from = draggedMusicRayIndex;
 	const to = index;
@@ -743,8 +686,7 @@ const handleKeydown = async (event) => {
 		return;
 	}
 	const tag = event.target?.tagName?.toLowerCase?.() || "";
-	const inEditable =
-		tag === "input" || tag === "textarea" || event.target?.isContentEditable;
+	const inEditable = tag === "input" || tag === "textarea" || event.target?.isContentEditable;
 	if ((event.metaKey || event.ctrlKey) && event.key?.toLowerCase() === "k") {
 		event.preventDefault();
 		await focusSearch();
@@ -909,25 +851,20 @@ const resumeRay = async (rayId) => {
 const nextTrack = async () => syncPayload(api.nextTrack());
 const previousTrack = async () => syncPayload(api.previousTrack());
 const addFolder = async () => {
-	await syncPayload(
-		libraryMode === "podcast" ? api.addPodcastFolder() : api.addFolder(),
-	);
+	await syncPayload(libraryMode === "podcast" ? api.addPodcastFolder() : api.addFolder());
 	if (libraryMode === "podcast") {
 		podcastResults = appState.podcasts || [];
 	}
 	setScreen("search");
 };
 const addFiles = async () => {
-	await syncPayload(
-		libraryMode === "podcast" ? api.addPodcastFiles() : api.addFiles(),
-	);
+	await syncPayload(libraryMode === "podcast" ? api.addPodcastFiles() : api.addFiles());
 	if (libraryMode === "podcast") {
 		podcastResults = appState.podcasts || [];
 	}
 	setScreen("search");
 };
-const removeFromQueue = async (trackId) =>
-	syncPayload(api.removeFromQueue(trackId));
+const removeFromQueue = async (trackId) => syncPayload(api.removeFromQueue(trackId));
 const changeSeek = async (event) => {
 	const pct = Number(event.currentTarget.value);
 	const duration = appState.current?.durationMs || 0;
@@ -966,10 +903,7 @@ const openSettings = async () => {
 	showSettings = true;
 };
 const pickOnnxRuntime = async () => {
-	const file = await api.chooseFile(
-		"Выберите библиотеку ONNX Runtime",
-		"*.dylib;*.so;*.dll",
-	);
+	const file = await api.chooseFile("Выберите библиотеку ONNX Runtime", "*.dylib;*.so;*.dll");
 	if (file) {
 		settingsPayload.onnxRuntimePath = file;
 		runtimeTestResult = null;
@@ -1000,9 +934,7 @@ const saveSettings = async () => {
 const applyDoctorPatch = (patch) => {
 	settingsPayload = {
 		...settingsPayload,
-		...(patch?.onnxRuntimePath
-			? { onnxRuntimePath: patch.onnxRuntimePath }
-			: {}),
+		...(patch?.onnxRuntimePath ? { onnxRuntimePath: patch.onnxRuntimePath } : {}),
 		...(patch?.miniLMModelDir ? { miniLMModelDir: patch.miniLMModelDir } : {}),
 		...(patch?.ffmpegPath ? { ffmpegPath: patch.ffmpegPath } : {}),
 		...(patch?.ffprobePath ? { ffprobePath: patch.ffprobePath } : {}),
@@ -1053,17 +985,13 @@ const submitExternalLink = async (event) => {
 	addLinkSubmitting = true;
 	addLinkError = "";
 	try {
-		const job = await api.addExternalLink(
-			url,
-			libraryMode === "podcast" ? "podcast" : "music",
-		);
+		const job = await api.addExternalLink(url, libraryMode === "podcast" ? "podcast" : "music");
 		putExternalDownload(job);
 		addLinkOpen = false;
 		await bootstrap();
 		await searchCurrentLibrary("");
 	} catch (error) {
-		addLinkError =
-			error?.message || String(error) || "Не удалось добавить ссылку";
+		addLinkError = error?.message || String(error) || "Не удалось добавить ссылку";
 	} finally {
 		addLinkSubmitting = false;
 	}
@@ -1091,8 +1019,7 @@ const commitSeek = async (nextRatio) => {
 			current: {
 				...prev.current,
 				...next,
-				durationMs:
-					next?.durationMs || prev.current?.durationMs || stableDurationMs,
+				durationMs: next?.durationMs || prev.current?.durationMs || stableDurationMs,
 			},
 		}));
 	} finally {
@@ -1192,9 +1119,7 @@ const extractDroppedURL = (dataTransfer) => {
 	const uriList = (dataTransfer.getData("text/uri-list") || "")
 		.split(/\r?\n/)
 		.map((value) => value.trim())
-		.find(
-			(value) => value && !value.startsWith("#") && /^https?:\/\//i.test(value),
-		);
+		.find((value) => value && !value.startsWith("#") && /^https?:\/\//i.test(value));
 	if (uriList) {
 		return uriList;
 	}
@@ -1204,9 +1129,7 @@ const extractDroppedURL = (dataTransfer) => {
 };
 
 const isExternalImportDrag = (event) =>
-	!internalRayDrag &&
-	(dataTransferHasFiles(event.dataTransfer) ||
-		dataTransferMayContainURL(event.dataTransfer));
+	!internalRayDrag && (dataTransferHasFiles(event.dataTransfer) || dataTransferMayContainURL(event.dataTransfer));
 
 function onDragEnter(event) {
 	if (!isExternalImportDrag(event)) {
@@ -1247,10 +1170,7 @@ async function onDrop(event) {
 	isDragging = false;
 	const droppedURL = extractDroppedURL(event.dataTransfer);
 	if (droppedURL) {
-		const job = await api.addExternalLink(
-			droppedURL,
-			libraryMode === "podcast" ? "podcast" : "music",
-		);
+		const job = await api.addExternalLink(droppedURL, libraryMode === "podcast" ? "podcast" : "music");
 		putExternalDownload(job);
 		await bootstrap();
 		await searchCurrentLibrary("");
@@ -1347,41 +1267,30 @@ const findTrackById = (trackId) => {
 const getTrackUIState = (trackId) => ({
 	isPlayingTrack: trackId === playback.currentTrackId,
 	isRaySeed: trackId === playback.raySeedTrackId && Boolean(playback.rayId),
-	isActuallyPlaying:
-		trackId === playback.currentTrackId && playback.status === "playing",
-	isPausedCurrent:
-		trackId === playback.currentTrackId && playback.status === "paused",
-	isLoadingCurrent:
-		trackId === playback.currentTrackId && playback.status === "loading",
+	isActuallyPlaying: trackId === playback.currentTrackId && playback.status === "playing",
+	isPausedCurrent: trackId === playback.currentTrackId && playback.status === "paused",
+	isLoadingCurrent: trackId === playback.currentTrackId && playback.status === "loading",
 });
-const rowIcon = (trackId) =>
-	getTrackUIState(trackId).isActuallyPlaying ? "Ⅱ" : "▶";
+const rowIcon = (trackId) => (getTrackUIState(trackId).isActuallyPlaying ? "Ⅱ" : "▶");
 const rowCurrent = (trackId) => getTrackUIState(trackId).isPlayingTrack;
 const rowRaySeed = (trackId) => getTrackUIState(trackId).isRaySeed;
 
-const rowIsBuildingRay = (trackId) =>
-	rayBuild.status === "building" && rayBuild.seedTrackId === trackId;
+const rowIsBuildingRay = (trackId) => rayBuild.status === "building" && rayBuild.seedTrackId === trackId;
 
 $: isRayBuilding = rayBuild.status === "building";
 
 const toggleInsight = async () => {
 	showInsight = !showInsight;
 
-	if (
-		showInsight &&
-		playback.currentTrackId &&
-		rayBuild.status !== "building"
-	) {
+	if (showInsight && playback.currentTrackId && rayBuild.status !== "building") {
 		await refreshAudit(playback.currentTrackId);
 	} else if (!showInsight) {
 		auditRows = [];
 	}
 };
 
-const isCurrentTrackPlaying = () =>
-	playback.status === "playing" && Boolean(playback.currentTrackId);
-const rayPlaying = () =>
-	Boolean(playback.status === "playing" && playback.currentTrackId);
+const isCurrentTrackPlaying = () => playback.status === "playing" && Boolean(playback.currentTrackId);
+const rayPlaying = () => Boolean(playback.status === "playing" && playback.currentTrackId);
 
 const emotionLabels = {
 	happy: "happy",
@@ -1430,12 +1339,7 @@ const normalizeEmotionKey = (value) => {
 
 const currentEmotionLabel = (emoFlow) => {
 	const current = emoFlow?.current;
-	return normalizeEmotionKey(
-		current?.dominant ||
-			current?.basis?.label ||
-			current?.label ||
-			emoFlow?.basis?.label,
-	);
+	return normalizeEmotionKey(current?.dominant || current?.basis?.label || current?.label || emoFlow?.basis?.label);
 };
 
 function num(value, digits = 2) {
@@ -1461,22 +1365,10 @@ function compactGenreTags(track) {
 	return tags
 		.slice(0, 4)
 		.map((tag) => {
-			const name =
-				tag?.label ||
-				tag?.Label ||
-				tag?.name ||
-				tag?.Name ||
-				tag?.genre ||
-				tag?.Genre ||
-				"";
+			const name = tag?.label || tag?.Label || tag?.name || tag?.Name || tag?.genre || tag?.Genre || "";
 			const detail = tag?.detail || tag?.Detail || "";
 			const score = Number(
-				tag?.score ??
-					tag?.Score ??
-					tag?.probability ??
-					tag?.Probability ??
-					tag?.value ??
-					tag?.Value,
+				tag?.score ?? tag?.Score ?? tag?.probability ?? tag?.Probability ?? tag?.value ?? tag?.Value,
 			);
 			const title = [name, detail].filter(Boolean).join(":");
 			if (!title) return "";
@@ -1500,9 +1392,7 @@ function playlistInsightLine(item, index) {
 	const ins = item?.insight || {};
 	const emo = ins.emotion || {};
 	const parts = [];
-	parts.push(
-		`flow: ${shortText(ins.bucket || item?.bucket, "—")}/${shortText(ins.strategy || item?.strategy, "—")}`,
-	);
+	parts.push(`flow: ${shortText(ins.bucket || item?.bucket, "—")}/${shortText(ins.strategy || item?.strategy, "—")}`);
 	parts.push(`pos ${index + 1}`);
 	parts.push(`score ${num(ins.score ?? item?.score, 2)}`);
 	parts.push(`mode ${shortText(ins.mode)}`);
@@ -1512,19 +1402,14 @@ function playlistInsightLine(item, index) {
 	parts.push(`dist ${num(ins.moodDistance, 2)}`);
 	parts.push(`jump ${num(ins.jumpPenalty, 2)}`);
 	parts.push(`tempo ${num(ins.tempoCompatibility, 2)}`);
-	if (emo.label)
-		parts.push(`emo ${shortText(emo.prevLabel)}→${shortText(emo.label)}`);
+	if (emo.label) parts.push(`emo ${shortText(emo.prevLabel)}→${shortText(emo.label)}`);
 	if (emo.distance !== undefined) parts.push(`edist ${num(emo.distance, 2)}`);
 	if (emo.hardJump !== undefined) parts.push(`ehard ${num(emo.hardJump, 2)}`);
-	if (emo.bridgeScore !== undefined)
-		parts.push(`ebr ${num(emo.bridgeScore, 2)}`);
-	if (emo.rawDistance !== undefined)
-		parts.push(`raw ${num(emo.rawDistance, 2)}`);
+	if (emo.bridgeScore !== undefined) parts.push(`ebr ${num(emo.bridgeScore, 2)}`);
+	if (emo.rawDistance !== undefined) parts.push(`raw ${num(emo.rawDistance, 2)}`);
 	if (emo.edgeDrive !== undefined) parts.push(`edge ${num(emo.edgeDrive, 2)}`);
-	if (emo.dirtyElectro !== undefined)
-		parts.push(`dirty ${num(emo.dirtyElectro, 2)}`);
-	if (emo.textureConfidence !== undefined)
-		parts.push(`tconf ${num(emo.textureConfidence, 2)}`);
+	if (emo.dirtyElectro !== undefined) parts.push(`dirty ${num(emo.dirtyElectro, 2)}`);
+	if (emo.textureConfidence !== undefined) parts.push(`tconf ${num(emo.textureConfidence, 2)}`);
 	if (ins.tempoUnknown) parts.push(`tempoUnknown`);
 	parts.push(`tex ${num(ins.textureContinuity, 2)}`);
 	parts.push(`voc ${num(ins.vocalContinuity, 2)}`);
@@ -1533,11 +1418,7 @@ function playlistInsightLine(item, index) {
 	parts.push(`nov ${num(ins.novelty, 2)}`);
 	parts.push(`Δe ${num(ins.energyDelta, 2)}`);
 	parts.push(`conf ${num(ins.confidence, 2)}`);
-	if (
-		ins.confidence >= 0.9 &&
-		(ins.tempoUnknown || ins.fallback || ins.warning)
-	)
-		parts.push(`conf?`);
+	if (ins.confidence >= 0.9 && (ins.tempoUnknown || ins.fallback || ins.warning)) parts.push(`conf?`);
 	if (ins.fallback) parts.push(`fallback ${ins.fallback}`);
 	if (ins.warning) parts.push(`warn ${ins.warning}`);
 	return parts.join(" · ");
@@ -1546,13 +1427,7 @@ function playlistInsightLine(item, index) {
 function trackDebugLine(item) {
 	const track = item?.track || findTrackById(item?.trackId);
 	if (!track) return `track: no track payload id=${item?.trackId || "—"}`;
-	const genre = [
-		track.genreLabel,
-		track.genrePrimary,
-		track.genreDetail,
-		track.genre,
-		compactGenreTags(track),
-	]
+	const genre = [track.genreLabel, track.genrePrimary, track.genreDetail, track.genre, compactGenreTags(track)]
 		.map((v) => String(v || "").trim())
 		.filter(Boolean)
 		.join(" / ");
@@ -1616,16 +1491,12 @@ $: currentTrack = appState.current || {};
 $: emoFlow = $emoFlowState || {};
 $: emoFlowCurrent = emoFlow.current || {};
 $: emoFlowSummary = emoFlow.reason || emoFlowCurrent.reason || "";
-$: emoFlowDirectionLabel =
-	emoFlow.direction || emoFlowCurrent.direction || "stable";
+$: emoFlowDirectionLabel = emoFlow.direction || emoFlowCurrent.direction || "stable";
 
 $: emoFlowEmotionLabel = currentEmotionLabel($emoFlowState) || "neutral";
 
 $: playerEmoFlowReason = String(
-	$emoFlowState?.transition?.reason ||
-		$emoFlowState?.reason ||
-		$emoFlowState?.current?.reason ||
-		"",
+	$emoFlowState?.transition?.reason || $emoFlowState?.reason || $emoFlowState?.current?.reason || "",
 ).trim();
 $: hasActiveMusic = Boolean(playback.currentTrackId) && !playingPodcast;
 $: appShellStyle =
@@ -1635,16 +1506,10 @@ $: appShellStyle =
 			? buildCssVars($cssVariables)
 			: defaultMusicAccentStyle;
 $: currentTrackMeta = trackById(playback.currentTrackId);
-$: currentQueueItem = (appState.queue || []).find(
-	(item) => item.trackId === playback.currentTrackId,
-);
-$: currentQueueIndex = (appState.queue || []).findIndex(
-	(item) => item.trackId === playback.currentTrackId,
-);
+$: currentQueueItem = (appState.queue || []).find((item) => item.trackId === playback.currentTrackId);
+$: currentQueueIndex = (appState.queue || []).findIndex((item) => item.trackId === playback.currentTrackId);
 $: libraryEmpty =
-	libraryMode === "podcast"
-		? (appState.podcasts || []).length === 0
-		: (appState.libraryStat?.tracks || 0) === 0;
+	libraryMode === "podcast" ? (appState.podcasts || []).length === 0 : (appState.libraryStat?.tracks || 0) === 0;
 $: visibleResults = results;
 $: appState = $state;
 
@@ -1657,9 +1522,7 @@ $: playingPodcast = isPodcastItemId(playback.currentTrackId);
 $: visualMode = resolveVisualMode(libraryMode);
 
 $: currentPodcast = playingPodcast
-	? (appState.podcasts || []).find(
-			(item) => item.id === playback.currentTrackId,
-		) || null
+	? (appState.podcasts || []).find((item) => item.id === playback.currentTrackId) || null
 	: null;
 
 $: playbackSelection = hasPlaybackSelection(playback, currentPodcast);
@@ -1670,11 +1533,7 @@ $: playerTitle = resolvePlayerTitle({
 	currentPodcast,
 });
 
-$: playerArtist =
-	currentPodcast?.author ||
-	currentPodcast?.series ||
-	playback.currentArtist ||
-	"";
+$: playerArtist = currentPodcast?.author || currentPodcast?.series || playback.currentArtist || "";
 
 $: playerSubline = playingPodcast
 	? [currentPodcast?.series, "Подкаст"].filter(Boolean).join(" · ")

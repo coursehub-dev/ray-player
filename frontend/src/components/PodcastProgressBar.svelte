@@ -7,12 +7,7 @@ const clamp = (value) => Math.max(0, Math.min(1, value));
 $: stored = Number(item?.completedRatio);
 $: position = Number(item?.lastPosition) || 0;
 $: duration = Number(item?.duration) || 0;
-$: progress =
-	Number.isFinite(stored) && stored > 0
-		? clamp(stored)
-		: duration > 0
-			? clamp(position / duration)
-			: 0;
+$: progress = Number.isFinite(stored) && stored > 0 ? clamp(stored) : duration > 0 ? clamp(position / duration) : 0;
 $: percentage = Math.round(progress * 100);
 </script>
 

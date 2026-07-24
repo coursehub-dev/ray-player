@@ -1,12 +1,6 @@
 <script>
 import { createEventDispatcher } from "svelte";
-import {
-	GripVertical,
-	LoaderCircle,
-	Pause,
-	Play,
-	Sparkles,
-} from "lucide-svelte";
+import { GripVertical, LoaderCircle, Pause, Play, Sparkles } from "lucide-svelte";
 import TrackMetaLine from "./TrackMetaLine.svelte";
 
 export let item;
@@ -55,10 +49,7 @@ const openMenu = (event) => {
 $: trackId = item?.trackId || item?.id || item?.track?.id || "";
 $: isCurrent = Boolean(trackId) && trackId === playback?.currentTrackId;
 $: isPlaying = isCurrent && playback?.status === "playing";
-$: isLoading =
-	Boolean(trackId) &&
-	trackId === playback?.currentTrackId &&
-	playback?.status === "loading";
+$: isLoading = Boolean(trackId) && trackId === playback?.currentTrackId && playback?.status === "loading";
 $: isSeed = Boolean(playback?.rayId) && trackId === playback?.raySeedTrackId;
 $: role = String(item?.rayRole || item?.role || (isSeed ? "seed" : "next"))
 	.trim()

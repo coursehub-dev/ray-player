@@ -24,24 +24,15 @@ function palette(hue) {
 test("new track starts in its own palette", () => {
 	const current = palette(225);
 	const next = palette(25);
-	assert.equal(
-		interpolateTrackPalette(current, next, 0).accent,
-		current.accent,
-	);
-	assert.equal(
-		interpolateTrackPalette(current, next, 0.5).accent,
-		current.accent,
-	);
+	assert.equal(interpolateTrackPalette(current, next, 0).accent, current.accent);
+	assert.equal(interpolateTrackPalette(current, next, 0.5).accent, current.accent);
 });
 
 test("outgoing track reaches incoming palette at natural end", () => {
 	const current = palette(225);
 	const next = palette(25);
 	assert.equal(interpolateTrackPalette(current, next, 1).accent, next.accent);
-	assert.notEqual(
-		interpolateTrackPalette(current, next, 0.91).accent,
-		current.accent,
-	);
+	assert.notEqual(interpolateTrackPalette(current, next, 0.91).accent, current.accent);
 });
 
 test("authoritative null neighbours clear stale transition state", () => {

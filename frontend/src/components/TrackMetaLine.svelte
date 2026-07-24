@@ -12,15 +12,7 @@ export let tempoConfidence = 0;
 export let className = "";
 
 const tagLabel = (tag) =>
-	String(
-		tag?.label ??
-			tag?.Label ??
-			tag?.name ??
-			tag?.Name ??
-			tag?.genre ??
-			tag?.Genre ??
-			"",
-	).trim();
+	String(tag?.label ?? tag?.Label ?? tag?.name ?? tag?.Name ?? tag?.genre ?? tag?.Genre ?? "").trim();
 
 const compactGenreText = (label, primary, tags, limit) => {
 	const preparedLabel = String(label || "").trim();
@@ -41,9 +33,7 @@ const compactGenreText = (label, primary, tags, limit) => {
 const formatBpm = (value, fallback, confidence) => {
 	const resolved = Math.round(Number(value || fallback || 0));
 	if (!showBpm || !resolved) return "";
-	return Number(confidence || 0) > 0 && Number(confidence || 0) < 0.35
-		? `~${resolved} BPM`
-		: `${resolved} BPM`;
+	return Number(confidence || 0) > 0 && Number(confidence || 0) < 0.35 ? `~${resolved} BPM` : `${resolved} BPM`;
 };
 
 $: resolvedArtist = String(artist || track?.artist || "").trim();
