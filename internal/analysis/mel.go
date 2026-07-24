@@ -123,7 +123,8 @@ func ExtractMelSpectrogramWithContext(
 func SelectMelAnalysisWindows(total time.Duration) []MelAnalysisWindow {
 	const (
 		singleWindow = 45 * time.Second
-		segment      = 15 * time.Second
+		segment      = 9 * time.Second
+		windowCount  = 5
 	)
 	if total <= 0 {
 		return []MelAnalysisWindow{{Duration: singleWindow}}
@@ -131,16 +132,17 @@ func SelectMelAnalysisWindows(total time.Duration) []MelAnalysisWindow {
 	if total <= singleWindow {
 		return []MelAnalysisWindow{{Duration: total}}
 	}
+
+	// Keep the same 45-second inference budget, but distribute it across the
+	// whole song. Start/middle/end-only sampling systematically misses drops,
+	// bridges and late high-energy sections in structurally complex tracks.
 	lastStart := total - segment
-	middleStart := total/2 - segment/2
-	if middleStart < 0 {
-		middleStart = 0
+	windows := make([]MelAnalysisWindow, 0, windowCount)
+	for i := 0; i < windowCount; i++ {
+		start := time.Duration(int64(lastStart) * int64(i) / int64(windowCount-1))
+		windows = append(windows, MelAnalysisWindow{Start: start, Duration: segment})
 	}
-	return []MelAnalysisWindow{
-		{Start: 0, Duration: segment},
-		{Start: middleStart, Duration: segment},
-		{Start: lastStart, Duration: segment},
-	}
+	return windows
 }
 
 func ExtractMelSpectrogramMode(path, mode string) ([]float32, int, error) {

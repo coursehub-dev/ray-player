@@ -680,9 +680,17 @@ func (n shortStatsNormalizer) Norm(name string, value float64) float64 {
 }
 
 func (n shortStatsNormalizer) NormWeighted(name string, value float64) float64 {
+	if normalized, ok := emotion.NormalizeSemanticFeature(name, value); ok {
+		return normalized
+	}
 	return n.Norm(name, value)
 }
-func (n shortStatsNormalizer) Reliability(name string) float64 { return 1 }
+func (n shortStatsNormalizer) Reliability(name string) float64 {
+	if trust, ok := emotion.SemanticFeatureTrust(name); ok {
+		return trust
+	}
+	return 1
+}
 
 func fallbackShortNorm(name string, v float64) float64 {
 	switch name {

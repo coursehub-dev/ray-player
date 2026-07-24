@@ -22,7 +22,11 @@ import (
 
 var essentiaLog = logx.New("essentia")
 
-const essentiaEmbeddingSize = 1280
+const (
+	essentiaEmbeddingSize         = 1280
+	genrePrimaryMinScore  float32 = 0.08
+	genrePrimaryMinMargin float32 = 0.025
+)
 
 var essentiaHeadNames = []string{
 	"danceability-discogs-effnet-1",
@@ -712,21 +716,12 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 
 	subTop := topKGenres(genreAvg, e.genreClasses, 15)
 	groupTop := topGenreGroups(genreAvg, e.genreClasses, 10)
-	primary, detail, score, margin := choosePrimaryGenre(groupTop, subTop)
-	result.GenrePrimary = primary
-	result.GenreDetail = detail
-	result.GenreScore = float64(score)
-	result.GenreMargin = float64(margin)
 	result.GenreTags = buildGenreTagsForUI(groupTop, 3)
-	result.GenrePrimary, result.GenreDetail = choosePrimaryFromTags(result.GenreTags)
-	result.GenreLabel = formatGenreTags(result.GenreTags)
 	finalizeGenreResult(&result)
-	result.GenreReliable = !quality.Suspicious()
+	result.GenreReliable = qualityErr == nil && !quality.Suspicious()
 	result.GenreQuality = quality
 
-	if !result.GenreReliable ||
-		result.GenreScore < 0.08 ||
-		result.GenreMargin < 0.025 {
+	if !genreResultAccepted(result.GenreReliable, result.GenreScore, result.GenreMargin) {
 		essentiaLog.W(
 			"genre rejected primary=%q detail=%q score=%.4f margin=%.4f reliable=%t",
 			result.GenrePrimary,
@@ -735,12 +730,7 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 			result.GenreMargin,
 			result.GenreReliable,
 		)
-		result.GenrePrimary = ""
-		result.GenreDetail = ""
-		result.GenreScore = 0
-		result.GenreMargin = 0
-		result.GenreTags = nil
-		result.GenreLabel = ""
+		clearGenreResult(&result)
 	}
 	essentiaLog.I("genre from head validPatches=%d primary=%q label=%q detail=%q groupScore=%.3f groupMargin=%.3f groups=%+v subTop=%+v", validPatches, result.GenrePrimary, result.GenreLabel, result.GenreDetail, result.GenreScore, result.GenreMargin, groupTop, subTop)
 	debugGenrePatchVotes(genreData, validPatches, e.genreClasses)
@@ -767,68 +757,10 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 			continue
 		}
 		essentiaLog.T("head ok name=%s prob0=%.4f len=%d avg=%d", name, probs[0], len(probs), len(avg))
-		switch name {
-		case "danceability-discogs-effnet-1":
-			result.Danceability = headClassProbability(head, avg, "danceable", "dance")
-		case "mood_happy-discogs-effnet-1":
-			result.MoodHappy = headClassProbability(head, avg, "happy")
-		case "mood_sad-discogs-effnet-1":
-			result.MoodSad = headClassProbability(head, avg, "sad")
-		case "mood_relaxed-discogs-effnet-1":
-			result.MoodRelaxed = headClassProbability(head, avg, "relaxed", "calm")
-		case "mood_party-discogs-effnet-1":
-			result.MoodParty = headClassProbability(head, avg, "party")
-		case "mood_aggressive-discogs-effnet-1":
-			result.MoodAggressive = headClassProbability(head, avg, "aggressive")
-		case "mood_acoustic-discogs-effnet-1":
-			result.Acousticness = headClassProbability(head, avg, "acoustic")
-		case "mood_electronic-discogs-effnet-1":
-			result.Electronic = headClassProbability(head, avg, "electronic")
-		case "voice_instrumental-discogs-effnet-1":
-			result.Instrumentalness = headClassProbability(head, avg, "instrumental")
-		case "timbre-discogs-effnet-1":
-			result.TimbreBrightness = headClassProbability(head, avg, "bright")
-		case "tonal_atonal-discogs-effnet-1":
-			result.Tonality = headClassProbability(head, avg, "tonal")
-		case "approachability_regression-discogs-effnet-1":
-			result.Approachability = regressionHeadValue(avg)
-		case "engagement_regression-discogs-effnet-1":
-			result.Engagement = regressionHeadValue(avg)
-		case "mtg_jamendo_moodtheme-discogs-effnet-1":
-			result.Melodicness = clamp01(
-				0.65*classProb(avg, head.classes, "melodic") +
-					0.20*classProb(avg, head.classes, "emotional") +
-					0.15*classProb(avg, head.classes, "romantic"),
-			)
-			result.Softness = clamp01(
-				0.45*classProb(avg, head.classes, "soft") +
-					0.35*classProb(avg, head.classes, "calm") +
-					0.20*classProb(avg, head.classes, "relaxing"),
-			)
-			result.Heaviness = clamp01(
-				0.50*classProb(avg, head.classes, "heavy") +
-					0.30*classProb(avg, head.classes, "powerful") +
-					0.20*classProb(avg, head.classes, "dramatic"),
-			)
-			result.Dreaminess = clamp01(
-				0.60*classProb(avg, head.classes, "dream") +
-					0.25*classProb(avg, head.classes, "deep") +
-					0.15*classProb(avg, head.classes, "romantic"),
-			)
-			result.Emotionality = clamp01(
-				0.45*classProb(avg, head.classes, "emotional") +
-					0.25*classProb(avg, head.classes, "melancholic") +
-					0.15*classProb(avg, head.classes, "romantic") +
-					0.15*classProb(avg, head.classes, "dramatic"),
-			)
-		}
+		applyHeadPrediction(&result, name, head, avg)
 	}
 
-	result.Valence = clamp01((result.MoodHappy + (1 - result.MoodSad)) * 0.5)
-	result.Energy = clamp01(maxf(result.MoodParty, result.MoodAggressive*0.85))
-	result.Melodicness = clamp01(maxf(result.Melodicness, 0.15*result.Tonality))
-	result.Softness = clamp01(maxf(result.Softness, 0.20*result.MoodRelaxed))
-	result.Heaviness = clamp01(maxf(result.Heaviness, 0.30*result.MoodAggressive))
+	finalizeDerivedFeatures(&result)
 	essentiaLog.D("heads done ms=%d", time.Since(headsStart).Milliseconds())
 	essentiaLog.D("derived dance=%.4f valence=%.4f acoustic=%.4f instr=%.4f energy=%.4f genre=%q detail=%q", result.Danceability, result.Valence, result.Acousticness, result.Instrumentalness, result.Energy, result.GenrePrimary, result.GenreDetail)
 	return result, nil
@@ -875,16 +807,8 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 	}
 
 	if len(discogsResult.MeanPredictions) > 0 && len(e.genreClasses) > 0 {
-		subTop := topKGenres(discogsResult.MeanPredictions, e.genreClasses, 15)
 		groupTop := topGenreGroups(discogsResult.MeanPredictions, e.genreClasses, 10)
-		primary, detail, score, margin := choosePrimaryGenre(groupTop, subTop)
-		result.GenrePrimary = primary
-		result.GenreDetail = detail
-		result.GenreScore = float64(score)
-		result.GenreMargin = float64(margin)
 		result.GenreTags = buildGenreTagsForUI(groupTop, 3)
-		result.GenrePrimary, result.GenreDetail = choosePrimaryFromTags(result.GenreTags)
-		result.GenreLabel = formatGenreTags(result.GenreTags)
 		finalizeGenreResult(&result)
 
 		patchPredictions := flattenPatchPredictions(discogsResult.PatchPredictions)
@@ -917,9 +841,7 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 			)
 		}
 
-		if !result.GenreReliable ||
-			result.GenreScore < 0.08 ||
-			result.GenreMargin < 0.025 {
+		if !genreResultAccepted(result.GenreReliable, result.GenreScore, result.GenreMargin) {
 			essentiaLog.W(
 				"discogs genre rejected primary=%q detail=%q score=%.4f margin=%.4f reliable=%t",
 				result.GenrePrimary,
@@ -928,12 +850,7 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 				result.GenreMargin,
 				result.GenreReliable,
 			)
-			result.GenrePrimary = ""
-			result.GenreDetail = ""
-			result.GenreScore = 0
-			result.GenreMargin = 0
-			result.GenreTags = nil
-			result.GenreLabel = ""
+			clearGenreResult(&result)
 		}
 	}
 
@@ -955,68 +872,10 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		if len(avg) == 0 {
 			continue
 		}
-		switch name {
-		case "danceability-discogs-effnet-1":
-			result.Danceability = headClassProbability(head, avg, "danceable", "dance")
-		case "mood_happy-discogs-effnet-1":
-			result.MoodHappy = headClassProbability(head, avg, "happy")
-		case "mood_sad-discogs-effnet-1":
-			result.MoodSad = headClassProbability(head, avg, "sad")
-		case "mood_relaxed-discogs-effnet-1":
-			result.MoodRelaxed = headClassProbability(head, avg, "relaxed", "calm")
-		case "mood_party-discogs-effnet-1":
-			result.MoodParty = headClassProbability(head, avg, "party")
-		case "mood_aggressive-discogs-effnet-1":
-			result.MoodAggressive = headClassProbability(head, avg, "aggressive")
-		case "mood_acoustic-discogs-effnet-1":
-			result.Acousticness = headClassProbability(head, avg, "acoustic")
-		case "mood_electronic-discogs-effnet-1":
-			result.Electronic = headClassProbability(head, avg, "electronic")
-		case "voice_instrumental-discogs-effnet-1":
-			result.Instrumentalness = headClassProbability(head, avg, "instrumental")
-		case "timbre-discogs-effnet-1":
-			result.TimbreBrightness = headClassProbability(head, avg, "bright")
-		case "tonal_atonal-discogs-effnet-1":
-			result.Tonality = headClassProbability(head, avg, "tonal")
-		case "approachability_regression-discogs-effnet-1":
-			result.Approachability = regressionHeadValue(avg)
-		case "engagement_regression-discogs-effnet-1":
-			result.Engagement = regressionHeadValue(avg)
-		case "mtg_jamendo_moodtheme-discogs-effnet-1":
-			result.Melodicness = clamp01(
-				0.65*classProb(avg, head.classes, "melodic") +
-					0.20*classProb(avg, head.classes, "emotional") +
-					0.15*classProb(avg, head.classes, "romantic"),
-			)
-			result.Softness = clamp01(
-				0.45*classProb(avg, head.classes, "soft") +
-					0.35*classProb(avg, head.classes, "calm") +
-					0.20*classProb(avg, head.classes, "relaxing"),
-			)
-			result.Heaviness = clamp01(
-				0.50*classProb(avg, head.classes, "heavy") +
-					0.30*classProb(avg, head.classes, "powerful") +
-					0.20*classProb(avg, head.classes, "dramatic"),
-			)
-			result.Dreaminess = clamp01(
-				0.60*classProb(avg, head.classes, "dream") +
-					0.25*classProb(avg, head.classes, "deep") +
-					0.15*classProb(avg, head.classes, "romantic"),
-			)
-			result.Emotionality = clamp01(
-				0.45*classProb(avg, head.classes, "emotional") +
-					0.25*classProb(avg, head.classes, "melancholic") +
-					0.15*classProb(avg, head.classes, "romantic") +
-					0.15*classProb(avg, head.classes, "dramatic"),
-			)
-		}
+		applyHeadPrediction(&result, name, head, avg)
 	}
 
-	result.Valence = clamp01((result.MoodHappy + (1 - result.MoodSad)) * 0.5)
-	result.Energy = clamp01(maxf(result.MoodParty, result.MoodAggressive*0.85))
-	result.Melodicness = clamp01(maxf(result.Melodicness, 0.15*result.Tonality))
-	result.Softness = clamp01(maxf(result.Softness, 0.20*result.MoodRelaxed))
-	result.Heaviness = clamp01(maxf(result.Heaviness, 0.30*result.MoodAggressive))
+	finalizeDerivedFeatures(&result)
 	essentiaLog.D("discogs heads done ms=%d", time.Since(headsStart).Milliseconds())
 	if err := result.ValidateSemanticOutput(); err != nil {
 		return EssentiaOutput{}, fmt.Errorf("Discogs semantic output validation failed: %w", err)
@@ -1409,7 +1268,7 @@ func buildGenreTagsForUI(groups []GenreGroupCandidate, limit int) []GenreTag {
 		return nil
 	}
 	tags := make([]GenreTag, 0, limit)
-	topScore := groups[0].Score
+	topScore := float32(0)
 	for _, g := range groups {
 		if len(tags) >= limit {
 			break
@@ -1422,6 +1281,7 @@ func buildGenreTagsForUI(groups []GenreGroupCandidate, limit int) []GenreTag {
 			if !acceptTopGenre(g) {
 				continue
 			}
+			topScore = g.Score
 		} else {
 			if !acceptSecondaryGenre(g, topScore) {
 				continue
@@ -1430,13 +1290,6 @@ func buildGenreTagsForUI(groups []GenreGroupCandidate, limit int) []GenreTag {
 		tags = append(tags, GenreTag{Label: label, Detail: genreDetailForUI(g), Score: float64(g.Score), Rank: len(tags) + 1, Support: g.Support})
 	}
 	return tags
-}
-
-func choosePrimaryFromTags(tags []GenreTag) (string, string) {
-	if len(tags) == 0 {
-		return "", ""
-	}
-	return tags[0].Label, tags[0].Detail
 }
 
 func formatGenreTags(tags []GenreTag) string {
@@ -1490,12 +1343,25 @@ func acceptTopGenre(g GenreGroupCandidate) bool {
 	if isNoisyDisplayGenre(g.Label) {
 		return false
 	}
-	switch g.Label {
-	case "Rock", "Electronic", "Pop", "Hip Hop", "Funk", "Reggae", "Jazz":
-		return g.Score >= 0.035 || g.BestSubScore >= 0.05
-	default:
-		return g.Score >= 0.05 || g.BestSubScore >= 0.07
+	return g.Score >= genrePrimaryMinScore
+}
+
+func genreResultAccepted(reliable bool, score, margin float64) bool {
+	return reliable &&
+		score >= float64(genrePrimaryMinScore) &&
+		margin >= float64(genrePrimaryMinMargin)
+}
+
+func clearGenreResult(result *EssentiaOutput) {
+	if result == nil {
+		return
 	}
+	result.GenrePrimary = ""
+	result.GenreDetail = ""
+	result.GenreScore = 0
+	result.GenreMargin = 0
+	result.GenreTags = nil
+	result.GenreLabel = ""
 }
 
 func acceptSecondaryGenre(g GenreGroupCandidate, topScore float32) bool {
@@ -1677,6 +1543,177 @@ func averageHeadPredictions(data []float32, validRows int) []float32 {
 		out[i] *= inv
 	}
 	return out
+}
+
+func applyHeadPrediction(result *EssentiaOutput, name string, head *essentiaHead, avg []float32) {
+	if result == nil || head == nil || len(avg) == 0 {
+		return
+	}
+	switch name {
+	case "danceability-discogs-effnet-1":
+		result.Danceability = headClassProbability(head, avg, "danceable", "dance")
+	case "mood_happy-discogs-effnet-1":
+		result.MoodHappy = headClassProbability(head, avg, "happy")
+	case "mood_sad-discogs-effnet-1":
+		result.MoodSad = headClassProbability(head, avg, "sad")
+	case "mood_relaxed-discogs-effnet-1":
+		result.MoodRelaxed = headClassProbability(head, avg, "relaxed", "calm")
+	case "mood_party-discogs-effnet-1":
+		result.MoodParty = headClassProbability(head, avg, "party")
+	case "mood_aggressive-discogs-effnet-1":
+		result.MoodAggressive = headClassProbability(head, avg, "aggressive")
+	case "mood_acoustic-discogs-effnet-1":
+		result.Acousticness = headClassProbability(head, avg, "acoustic")
+	case "mood_electronic-discogs-effnet-1":
+		result.Electronic = headClassProbability(head, avg, "electronic")
+	case "voice_instrumental-discogs-effnet-1":
+		result.Instrumentalness = headClassProbability(head, avg, "instrumental")
+	case "timbre-discogs-effnet-1":
+		result.TimbreBrightness = headClassProbability(head, avg, "bright")
+	case "tonal_atonal-discogs-effnet-1":
+		result.Tonality = headClassProbability(head, avg, "tonal")
+	case "approachability_regression-discogs-effnet-1":
+		result.Approachability = regressionHeadValue(avg)
+	case "engagement_regression-discogs-effnet-1":
+		result.Engagement = regressionHeadValue(avg)
+	case "mtg_jamendo_moodtheme-discogs-effnet-1":
+		// This head is multi-label: related tags are independent evidence, not
+		// mutually exclusive classes. A weighted average suppresses every axis
+		// when several valid tags are moderately active, so combine them as a
+		// bounded probabilistic union instead.
+		result.Melodicness = weightedClassEvidence(avg, head.classes, map[string]float64{
+			"melodic": 1.00, "emotional": 0.25, "romantic": 0.20, "ballad": 0.15,
+		})
+		result.Softness = weightedClassEvidence(avg, head.classes, map[string]float64{
+			"soft": 1.00, "calm": 0.45, "relaxing": 0.45, "meditative": 0.25,
+		})
+		result.Heaviness = weightedClassEvidence(avg, head.classes, map[string]float64{
+			"heavy": 1.00, "powerful": 0.45, "epic": 0.25, "dramatic": 0.20,
+		})
+		result.Dreaminess = weightedClassEvidence(avg, head.classes, map[string]float64{
+			"dream": 1.00, "space": 0.35, "soundscape": 0.30, "deep": 0.25, "romantic": 0.15,
+		})
+		result.Emotionality = weightedClassEvidence(avg, head.classes, map[string]float64{
+			"emotional": 1.00, "melancholic": 0.40, "dramatic": 0.35, "romantic": 0.25, "sad": 0.20,
+		})
+	}
+}
+
+func finalizeDerivedFeatures(result *EssentiaOutput) {
+	if result == nil {
+		return
+	}
+	result.Valence = deriveValence(
+		result.MoodHappy,
+		result.MoodSad,
+		result.MoodRelaxed,
+		result.MoodParty,
+		result.MoodAggressive,
+	)
+	result.Energy = deriveEnergy(
+		result.Danceability,
+		result.MoodParty,
+		result.MoodAggressive,
+		result.Engagement,
+	)
+	result.Melodicness = clamp01(maxf(result.Melodicness, 0.15*result.Tonality))
+	result.Softness = clamp01(maxf(result.Softness, 0.20*result.MoodRelaxed))
+	result.Heaviness = clamp01(maxf(result.Heaviness, 0.30*result.MoodAggressive))
+}
+
+func deriveValence(happy, sad, relaxed, party, aggressive float64) float64 {
+	// "Not sad" is neutral evidence, not positive valence. Use explicit
+	// positive and negative heads around a neutral midpoint instead.
+	positive := 0.78*clamp01(happy) + 0.12*clamp01(party) + 0.10*clamp01(relaxed)
+	negative := 0.65*clamp01(sad) + 0.25*clamp01(aggressive) + 0.10*(1-clamp01(relaxed))
+	return clamp01(0.5 + 0.60*(positive-negative))
+}
+
+func deriveEnergy(dance, party, aggressive, engagement float64) float64 {
+	base := 0.34*clamp01(dance) +
+		0.28*clamp01(party) +
+		0.24*clamp01(aggressive) +
+		0.14*clamp01(engagement)
+	peak := maxf(clamp01(party), clamp01(aggressive))
+	return clamp01(0.60*base + 0.40*peak)
+}
+
+func weightedClassEvidence(probs []float32, classes []string, weights map[string]float64) float64 {
+	remaining := 1.0
+	for className, weight := range weights {
+		evidence := clamp01(classProb(probs, classes, className) * clamp01(weight))
+		remaining *= 1 - evidence
+	}
+	return clamp01(1 - remaining)
+}
+
+type regressionHeadDiagnostics struct {
+	Value      float64
+	RawMin     float64
+	RawMax     float64
+	RawMean    float64
+	RawStd     float64
+	ValidRows  int
+	OutOfRange int
+	Saturated  bool
+	Reliable   bool
+}
+
+func aggregateRegressionHead(data []float32, rows int) regressionHeadDiagnostics {
+	d := regressionHeadDiagnostics{Value: 0.5}
+	if rows <= 0 || len(data) == 0 || len(data)%rows != 0 {
+		return d
+	}
+	dims := len(data) / rows
+	if dims <= 0 {
+		return d
+	}
+	values := make([]float64, 0, rows)
+	for row := 0; row < rows; row++ {
+		v := float64(data[row*dims])
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		values = append(values, v)
+		if v < -0.05 || v > 1.05 {
+			d.OutOfRange++
+		}
+	}
+	if len(values) == 0 {
+		return d
+	}
+	d.ValidRows = len(values)
+	sort.Float64s(values)
+	d.RawMin = values[0]
+	d.RawMax = values[len(values)-1]
+	for _, v := range values {
+		d.RawMean += v
+	}
+	d.RawMean /= float64(len(values))
+	variance := 0.0
+	for _, v := range values {
+		delta := v - d.RawMean
+		variance += delta * delta
+	}
+	d.RawStd = math.Sqrt(variance / float64(len(values)))
+	d.Saturated = d.ValidRows >= 4 && d.RawStd < 1e-5 &&
+		(d.RawMean <= 0.005 || d.RawMean >= 0.995)
+	if d.OutOfRange > max(1, d.ValidRows/4) || d.Saturated {
+		return d
+	}
+	start := len(values) / 10
+	end := len(values) - start
+	if start >= end {
+		start = 0
+		end = len(values)
+	}
+	sum := 0.0
+	for _, v := range values[start:end] {
+		sum += clamp01(v)
+	}
+	d.Value = sum / float64(end-start)
+	d.Reliable = true
+	return d
 }
 
 func regressionHeadValue(probs []float32) float64 {

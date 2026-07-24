@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	"ray-player1/internal/emotion"
@@ -38,5 +39,15 @@ func TestToUltraShortReportMarksMode(t *testing.T) {
 	got := toUltraShortReport(r)
 	if got.Mode != "ultrashort" {
 		t.Fatalf("expected ultrashort mode, got %s", got.Mode)
+	}
+}
+
+func TestShortStatsNormalizerUsesProductionSemanticTrust(t *testing.T) {
+	n := shortStatsNormalizer{}
+	if got := n.NormWeighted("Energy", 0.73); math.Abs(got-0.73) > 1e-9 {
+		t.Fatalf("energy=%.6f want=0.73", got)
+	}
+	if got := n.NormWeighted("Dreaminess", 0.10); math.Abs(got-0.045) > 1e-9 {
+		t.Fatalf("dreaminess=%.6f want=0.045", got)
 	}
 }

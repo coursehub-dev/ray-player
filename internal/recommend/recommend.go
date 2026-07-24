@@ -955,58 +955,60 @@ func NewService(events *events.Service, rays *rays.Service) *Service {
 
 func (s *Service) Recluster(tracks []library.Track) {
 	start := time.Now()
-	k := max(3, int(math.Sqrt(float64(len(tracks)))))
 	if len(tracks) == 0 {
 		recommendLog.D("recluster skipped empty library")
 		return
 	}
+	k := max(3, int(math.Sqrt(float64(len(tracks)))))
 	before := make(map[string]int, len(tracks))
 	for _, track := range tracks {
-		if len(track.Embedding) != modelcontract.DiscogsEmbeddingSize {
-			continue
-		}
 		before[track.ID] = track.ClusterID
 	}
-	recommendLog.I("recluster start tracks=%d k=%d", len(tracks), k)
-	centroids := initialClusterCentroids(tracks, k)
+
+	normalizer := BuildFeatureNormalizer(tracks)
+	points := make([][]float64, len(tracks))
+	for i := range tracks {
+		if len(tracks[i].Embedding) != modelcontract.DiscogsEmbeddingSize {
+			continue
+		}
+		points[i] = emotionClusterVector(tracks[i], normalizer)
+	}
+
+	recommendLog.I("recluster start tracks=%d k=%d mode=emotion", len(tracks), k)
+	centroids := initialEmotionClusterCentroids(tracks, k, normalizer)
 	if len(centroids) == 0 {
 		for i := range tracks {
-			tracks[i].ClusterID = i % k
-			recommendLog.T("recluster fallback track=%s cluster=%d reason=no-embeddings", tracks[i].ID, tracks[i].ClusterID)
+			tracks[i].ClusterID = 0
+			recommendLog.T("recluster fallback track=%s cluster=0 reason=no-semantic-analysis", tracks[i].ID)
 		}
-		changed := 0
-		for _, track := range tracks {
-			if before[track.ID] != track.ClusterID {
-				changed++
-			}
-		}
-		recommendLog.I("recluster done tracks=%d clusters=%d changed=%d mode=fallback-no-embeddings ms=%d", len(tracks), k, changed, time.Since(start).Milliseconds())
+		recommendLog.I("recluster done tracks=%d clusters=1 changed=%d mode=fallback-no-semantic-analysis ms=%d", len(tracks), changedClusterCount(tracks, before), time.Since(start).Milliseconds())
 		return
 	}
-	for iter := 0; iter < 4; iter++ {
-		recommendLog.D("recluster iter=%d centroids=%d", iter+1, len(centroids))
+
+	for iter := 0; iter < 6; iter++ {
+		recommendLog.D("recluster iter=%d centroids=%d mode=emotion", iter+1, len(centroids))
 		sums := make([][]float64, len(centroids))
 		counts := make([]int, len(centroids))
 		for i := range sums {
 			sums[i] = make([]float64, len(centroids[i]))
 		}
 		for i := range tracks {
-			if len(tracks[i].Embedding) != modelcontract.DiscogsEmbeddingSize {
+			if len(points[i]) == 0 {
 				tracks[i].ClusterID = 0
 				continue
 			}
 			best := 0
-			bestScore := -1.0
+			bestDistance := math.Inf(1)
 			for c := range centroids {
-				score := vectorSim(tracks[i].Embedding, centroids[c])
-				if score > bestScore {
-					best, bestScore = c, score
+				distance := emotionVectorDistance(points[i], centroids[c])
+				if distance < bestDistance {
+					best, bestDistance = c, distance
 				}
 			}
 			tracks[i].ClusterID = best
 			counts[best]++
-			for d := 0; d < len(centroids[best]) && d < len(tracks[i].Embedding); d++ {
-				sums[best][d] += float64(tracks[i].Embedding[d])
+			for d := range centroids[best] {
+				sums[best][d] += points[i][d]
 			}
 		}
 		for c := range centroids {
@@ -1014,27 +1016,45 @@ func (s *Service) Recluster(tracks []library.Track) {
 				continue
 			}
 			for d := range centroids[c] {
-				centroids[c][d] = float32(sums[c][d] / float64(counts[c]))
+				centroids[c][d] = sums[c][d] / float64(counts[c])
 			}
-			recommendLog.T("centroid updated iter=%d cluster=%d count=%d", iter+1, c, counts[c])
+			recommendLog.T("centroid updated iter=%d cluster=%d count=%d mode=emotion", iter+1, c, counts[c])
 		}
 	}
+	for _, track := range tracks {
+		basis := emotion.Compute(track, normalizer).Basis
+		recommendLog.D(
+			"recluster assignment track=%s title=%q cluster=%d emotion=%q joy=%.3f melancholy=%.3f serenity=%.3f combat=%.3f",
+			track.ID,
+			track.Title,
+			track.ClusterID,
+			basis.Label,
+			basis.Joy,
+			basis.Melancholy,
+			basis.Serenity,
+			basis.Combat,
+		)
+	}
+	recommendLog.I("recluster done tracks=%d clusters=%d changed=%d mode=emotion ms=%d", len(tracks), len(centroids), changedClusterCount(tracks, before), time.Since(start).Milliseconds())
+}
+
+func changedClusterCount(tracks []library.Track, before map[string]int) int {
 	changed := 0
 	for _, track := range tracks {
 		if before[track.ID] != track.ClusterID {
 			changed++
 		}
 	}
-	recommendLog.I("recluster done tracks=%d clusters=%d changed=%d ms=%d", len(tracks), len(centroids), changed, time.Since(start).Milliseconds())
+	return changed
 }
 
-func initialClusterCentroids(tracks []library.Track, k int) [][]float32 {
+func initialEmotionClusterCentroids(tracks []library.Track, k int, normalizer FeatureNormalizer) [][]float64 {
 	if k <= 0 {
 		return nil
 	}
 	type candidate struct {
-		id        string
-		embedding []float32
+		id     string
+		vector []float64
 	}
 	candidates := make([]candidate, 0, len(tracks))
 	for _, track := range tracks {
@@ -1046,8 +1066,8 @@ func initialClusterCentroids(tracks []library.Track, k int) [][]float32 {
 			id = strings.TrimSpace(track.Path)
 		}
 		candidates = append(candidates, candidate{
-			id:        id,
-			embedding: track.Embedding,
+			id:     id,
+			vector: emotionClusterVector(track, normalizer),
 		})
 	}
 	if len(candidates) == 0 {
@@ -1057,20 +1077,19 @@ func initialClusterCentroids(tracks []library.Track, k int) [][]float32 {
 		if candidates[i].id != candidates[j].id {
 			return candidates[i].id < candidates[j].id
 		}
-		return embeddingLexLess(candidates[i].embedding, candidates[j].embedding)
+		return emotionVectorLexLess(candidates[i].vector, candidates[j].vector)
 	})
 	if k > len(candidates) {
 		k = len(candidates)
 	}
 
-	centroids := make([][]float32, 0, k)
+	centroids := make([][]float64, 0, k)
 	selected := make([]bool, len(candidates))
 	selected[0] = true
-	centroids = append(centroids, append([]float32{}, candidates[0].embedding...))
+	centroids = append(centroids, append([]float64{}, candidates[0].vector...))
 
-	// Deterministic farthest-first seeding avoids the old "first k tracks" bias.
-	// The result is stable for the same library even if DB/query order changes, while
-	// still spreading initial seeds across the embedding space.
+	// Deterministic farthest-first seeding keeps cluster IDs reproducible for
+	// the same library while spreading seeds over subjective emotion space.
 	for len(centroids) < k {
 		bestIndex := -1
 		bestDistance := -1.0
@@ -1080,7 +1099,7 @@ func initialClusterCentroids(tracks []library.Track, k int) [][]float32 {
 			}
 			nearestDistance := math.Inf(1)
 			for _, centroid := range centroids {
-				distance := 1 - math.Max(-1, math.Min(1, vectorSim(candidates[i].embedding, centroid)))
+				distance := emotionVectorDistance(candidates[i].vector, centroid)
 				if distance < nearestDistance {
 					nearestDistance = distance
 				}
@@ -1094,12 +1113,44 @@ func initialClusterCentroids(tracks []library.Track, k int) [][]float32 {
 			break
 		}
 		selected[bestIndex] = true
-		centroids = append(centroids, append([]float32{}, candidates[bestIndex].embedding...))
+		centroids = append(centroids, append([]float64{}, candidates[bestIndex].vector...))
 	}
 	return centroids
 }
 
-func embeddingLexLess(a, b []float32) bool {
+func emotionClusterVector(track library.Track, normalizer FeatureNormalizer) []float64 {
+	basis := emotion.Compute(track, normalizer).Basis
+	return []float64{
+		basis.Motion,
+		basis.Roughness,
+		basis.Smoothness,
+		basis.Pressure,
+		basis.Joy,
+		basis.Melancholy,
+		basis.Serenity,
+		basis.Swagger,
+		basis.Combat,
+		basis.Dreaminess,
+	}
+}
+
+func emotionVectorDistance(a, b []float64) float64 {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	if n == 0 {
+		return math.Inf(1)
+	}
+	sum := 0.0
+	for i := 0; i < n; i++ {
+		delta := a[i] - b[i]
+		sum += delta * delta
+	}
+	return math.Sqrt(sum / float64(n))
+}
+
+func emotionVectorLexLess(a, b []float64) bool {
 	n := len(a)
 	if len(b) < n {
 		n = len(b)

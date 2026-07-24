@@ -149,7 +149,7 @@ type Tuning struct {
 
 func DefaultTuning() Tuning {
 	return Tuning{
-		Version: "emotion-v5-tunable",
+		Version: "emotion-v6-stable-semantic-scale",
 
 		MotionDance: 0.36, MotionGroove: 0.22, MotionParty: 0.16, MotionSprintTempo: 0.14, MotionDensity: 0.12,
 		DensityLoudness: 0.36, DensityRMS: 0.34, DensityDynamic: 0.30, DensityLowBand: 0.00, DensityHighPenalty: 0.00,

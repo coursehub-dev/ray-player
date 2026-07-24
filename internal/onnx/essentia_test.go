@@ -259,15 +259,84 @@ func TestGenreTagsSuppressNoisyWeakDetails(t *testing.T) {
 }
 
 func TestGenreTagsRequireConfidentPrimary(t *testing.T) {
-	groups := []GenreGroupCandidate{{
-		Label:        "Hip Hop",
-		Score:        0.10,
-		BestSubLabel: "Hip Hop / DJ Battle Tool",
-		BestSubScore: 0.11,
-		Support:      1,
-	}}
-	if tags := buildGenreTagsForUI(groups, 3); len(tags) != 0 {
-		t.Fatalf("weak primary must be rejected, got %#v", tags)
+	tests := []struct {
+		name    string
+		score   float32
+		bestSub float32
+		want    int
+	}{
+		{
+			name:    "below grouped score threshold",
+			score:   genrePrimaryMinScore - 0.001,
+			bestSub: 0.99,
+			want:    0,
+		},
+		{
+			name:    "at grouped score threshold",
+			score:   genrePrimaryMinScore,
+			bestSub: 0.01,
+			want:    1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			groups := []GenreGroupCandidate{{
+				Label:        "Hip Hop",
+				Score:        test.score,
+				BestSubLabel: "Hip Hop / DJ Battle Tool",
+				BestSubScore: test.bestSub,
+				Support:      1,
+			}}
+			if tags := buildGenreTagsForUI(groups, 3); len(tags) != test.want {
+				t.Fatalf("tags=%#v want len=%d", tags, test.want)
+			}
+		})
+	}
+}
+
+func TestGenreTagsUseAcceptedPrimaryForSecondaryThreshold(t *testing.T) {
+	groups := []GenreGroupCandidate{
+		{Label: "Non-Music", Score: 0.90, BestSubScore: 0.90, Support: 4},
+		{Label: "Rock", Score: 0.10, BestSubScore: 0.11, Support: 3},
+		{Label: "Electronic", Score: 0.09, BestSubScore: 0.10, Support: 3},
+	}
+
+	tags := buildGenreTagsForUI(groups, 3)
+	if len(tags) != 2 {
+		t.Fatalf("expected Rock and Electronic tags, got %#v", tags)
+	}
+	if tags[0].Label != "Rock" || tags[1].Label != "Electronic" {
+		t.Fatalf("unexpected tag order: %#v", tags)
+	}
+
+	result := EssentiaOutput{GenreTags: tags}
+	finalizeGenreResult(&result)
+	if genreResultAccepted(true, result.GenreScore, result.GenreMargin) {
+		t.Fatalf("near-tied genres must fail the confidence gate: score=%.3f margin=%.3f", result.GenreScore, result.GenreMargin)
+	}
+}
+
+func TestGenreResultAcceptedRequiresReliableScoreAndMargin(t *testing.T) {
+	tests := []struct {
+		name     string
+		reliable bool
+		score    float64
+		margin   float64
+		want     bool
+	}{
+		{name: "accepted", reliable: true, score: float64(genrePrimaryMinScore), margin: float64(genrePrimaryMinMargin), want: true},
+		{name: "unreliable", reliable: false, score: 1, margin: 1, want: false},
+		{name: "score below threshold", reliable: true, score: float64(genrePrimaryMinScore) - 0.001, margin: 1, want: false},
+		{name: "margin below threshold", reliable: true, score: 1, margin: float64(genrePrimaryMinMargin) - 0.001, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := genreResultAccepted(test.reliable, test.score, test.margin); got != test.want {
+				t.Fatalf("genreResultAccepted(%t, %.3f, %.3f)=%t want=%t", test.reliable, test.score, test.margin, got, test.want)
+			}
+		})
 	}
 }
 

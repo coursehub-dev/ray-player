@@ -34,18 +34,36 @@ func TestBuildFeatureNormalizerComputesStats(t *testing.T) {
 	}
 }
 
-func TestNormalizeTrackFeaturesAppliesPercentile(t *testing.T) {
+func TestNormalizeTrackFeaturesKeepsCalibratedSemanticProbabilities(t *testing.T) {
 	tracks := []library.Track{
+		{Energy: 0.1, Danceability: 0.2, Valence: 0.3, AnalyzedLevel: 2},
 		{Energy: 0.5, Danceability: 0.6, Valence: 0.7, AnalyzedLevel: 2},
-		{Energy: 0.6, Danceability: 0.7, Valence: 0.8, AnalyzedLevel: 2},
-		{Energy: 0.7, Danceability: 0.8, Valence: 0.9, AnalyzedLevel: 2},
+		{Energy: 0.9, Danceability: 1.0, Valence: 0.8, AnalyzedLevel: 2},
 	}
 	normalizer := BuildFeatureNormalizer(tracks)
 	track := library.Track{Energy: 0.7, Danceability: 0.8, Valence: 0.9, AnalyzedLevel: 2}
 	normalized := normalizeTrackFeatures(track, normalizer)
-	// With only 3 tracks, reliability is low and the value is only partially moved.
-	if normalized.Energy <= 0.5 || normalized.Energy >= 0.75 {
-		t.Fatalf("expected partially damped energy in (0.5,0.75), got %f", normalized.Energy)
+	if math.Abs(normalized.Energy-0.7) > 1e-9 {
+		t.Fatalf("energy changed from calibrated value: got %.6f", normalized.Energy)
+	}
+	if math.Abs(normalized.Danceability-0.8) > 1e-9 {
+		t.Fatalf("danceability changed from calibrated value: got %.6f", normalized.Danceability)
+	}
+	if math.Abs(normalized.Valence-0.9) > 1e-9 {
+		t.Fatalf("valence changed from calibrated value: got %.6f", normalized.Valence)
+	}
+}
+
+func TestSemanticNormalizationIsLibraryInvariant(t *testing.T) {
+	base := []library.Track{{Energy: 0.2}, {Energy: 0.8}}
+	expanded := append([]library.Track{}, base...)
+	for i := 0; i < 50; i++ {
+		expanded = append(expanded, library.Track{Energy: float64(i) / 49.0})
+	}
+	baseNorm := BuildFeatureNormalizer(base).NormWeighted("Energy", 0.73)
+	expandedNorm := BuildFeatureNormalizer(expanded).NormWeighted("Energy", 0.73)
+	if math.Abs(baseNorm-expandedNorm) > 1e-9 {
+		t.Fatalf("semantic value depends on library composition: base=%.6f expanded=%.6f", baseNorm, expandedNorm)
 	}
 }
 
@@ -75,23 +93,16 @@ func TestIsUsableFeatureFiltersUnreliable(t *testing.T) {
 	}
 }
 
-func TestNormalizerSaturatedFeatureBecomesNeutral(t *testing.T) {
+func TestSaturatedEvidenceFeatureDoesNotBecomeFakeEvidence(t *testing.T) {
 	tracks := make([]library.Track, 30)
 	for i := range tracks {
 		tracks[i].Sad = 0
-		tracks[i].Danceability = float64(i) / 29.0
 	}
 
 	n := BuildFeatureNormalizer(tracks)
-	if n.Reliability("Sad") != 0 {
-		t.Fatalf("sad reliability should be zero for saturated feature, got %.3f", n.Reliability("Sad"))
-	}
 	got := n.NormWeighted("Sad", 0)
-	if math.Abs(got-0.5) > 0.001 {
-		t.Fatalf("saturated feature should normalize to neutral 0.5, got %.3f", got)
-	}
-	if n.Reliability("Danceability") <= 0.5 {
-		t.Fatalf("danceability should have useful reliability, got %.3f", n.Reliability("Danceability"))
+	if math.Abs(got) > 0.001 {
+		t.Fatalf("absent sadness became synthetic evidence: got %.3f", got)
 	}
 }
 
@@ -115,16 +126,11 @@ func TestNormalizerDoesNotInvalidateIndividualZeroOne(t *testing.T) {
 	}
 }
 
-func TestNormalizerNoSpreadReturnsNeutral(t *testing.T) {
-	tracks := make([]library.Track, 30)
-	for i := range tracks {
-		tracks[i].Aggressive = 0.001
-	}
-
-	n := BuildFeatureNormalizer(tracks)
-	got := n.Norm("Aggressive", 0.001)
-	if math.Abs(got-0.5) > 0.001 {
-		t.Fatalf("no-spread feature should return neutral, got %.3f", got)
+func TestWeakAuxiliaryEvidenceIsReducedTowardAbsence(t *testing.T) {
+	n := BuildFeatureNormalizer(nil)
+	got := n.NormWeighted("Dreaminess", 0.10)
+	if got >= 0.10 || got <= 0 {
+		t.Fatalf("weak auxiliary evidence should be reduced but remain positive, got %.3f", got)
 	}
 }
 

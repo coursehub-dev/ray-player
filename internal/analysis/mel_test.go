@@ -105,19 +105,36 @@ func TestMusiCNNUnitTriangleFiltersHaveApproximatelyUnitArea(t *testing.T) {
 	}
 }
 
-func TestSelectMelAnalysisWindowsUsesThreeSegmentsForLongTrack(t *testing.T) {
+func TestSelectMelAnalysisWindowsDistributesFiveSegmentsForLongTrack(t *testing.T) {
 	windows := SelectMelAnalysisWindows(3 * time.Minute)
-	if len(windows) != 3 {
-		t.Fatalf("windows=%d want=3", len(windows))
+	if len(windows) != 5 {
+		t.Fatalf("windows=%d want=5", len(windows))
 	}
-	if windows[0].Start != 0 || windows[0].Duration != 15*time.Second {
-		t.Fatalf("unexpected first window: %+v", windows[0])
+	wantStarts := []time.Duration{
+		0,
+		42*time.Second + 750*time.Millisecond,
+		85*time.Second + 500*time.Millisecond,
+		128*time.Second + 250*time.Millisecond,
+		171 * time.Second,
 	}
-	if windows[1].Start != 82*time.Second+500*time.Millisecond {
-		t.Fatalf("unexpected middle window start: %v", windows[1].Start)
+	for i, window := range windows {
+		if window.Start != wantStarts[i] || window.Duration != 9*time.Second {
+			t.Fatalf("window[%d]=%+v want start=%v duration=9s", i, window, wantStarts[i])
+		}
 	}
-	if windows[2].Start != 165*time.Second {
-		t.Fatalf("unexpected final window start: %v", windows[2].Start)
+}
+
+func TestSelectMelAnalysisWindowsKeepsFortyFiveSecondBudget(t *testing.T) {
+	windows := SelectMelAnalysisWindows(6 * time.Minute)
+	total := time.Duration(0)
+	for i, window := range windows {
+		total += window.Duration
+		if i > 0 && window.Start <= windows[i-1].Start {
+			t.Fatalf("windows are not ordered: previous=%+v current=%+v", windows[i-1], window)
+		}
+	}
+	if total != 45*time.Second {
+		t.Fatalf("analysis budget=%v want=45s", total)
 	}
 }
 

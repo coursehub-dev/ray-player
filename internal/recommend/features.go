@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	"ray-player1/internal/emotion"
 	"ray-player1/internal/library"
 )
 
@@ -63,17 +64,26 @@ func BuildFeatureNormalizer(tracks []library.Track) FeatureNormalizer {
 }
 
 func (n FeatureNormalizer) Norm(name string, value float64) float64 {
+	if _, ok := emotion.SemanticFeatureTrust(name); ok {
+		// Classifier probabilities and bounded regression outputs already have
+		// global meaning. Percentile-remapping them against the current library
+		// makes the same track change emotion when unrelated tracks are added.
+		return clamp01(value)
+	}
 	st, ok := n.Stats[name]
 	if !ok {
 		return fallbackFeatureNorm(name, value)
 	}
-	if st.Invalid || st.Reliability <= 0 || st.P95-st.P05 < 0.03 {
-		return 0.5
+	if st.Invalid || st.Reliability <= 0 || st.P95-st.P05 < minUsefulSpread(name) {
+		return fallbackFeatureNorm(name, value)
 	}
 	return clamp01((value - st.P05) / (st.P95 - st.P05))
 }
 
 func (n FeatureNormalizer) Reliability(name string) float64 {
+	if trust, ok := emotion.SemanticFeatureTrust(name); ok {
+		return trust
+	}
 	st, ok := n.Stats[name]
 	if !ok {
 		return 0.35
@@ -85,6 +95,9 @@ func (n FeatureNormalizer) Reliability(name string) float64 {
 }
 
 func (n FeatureNormalizer) NormWeighted(name string, value float64) float64 {
+	if normalized, ok := emotion.NormalizeSemanticFeature(name, value); ok {
+		return normalized
+	}
 	norm := n.Norm(name, value)
 	rel := n.Reliability(name)
 	if rel <= 0 && isRawAudioFeature(name) {
