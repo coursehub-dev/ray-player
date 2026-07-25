@@ -47,11 +47,12 @@ $: if (open && !submitting) {
         role="presentation"
         on:click|self={close}
     >
-        <section
+        <div
             class="add-link-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="add-link-title"
+            tabindex="-1"
         >
             <header>
                 <span class="add-link-icon">
@@ -126,6 +127,6 @@ $: if (open && !submitting) {
                     </button>
                 </footer>
             </form>
-        </section>
+        </div>
     </div>
 {/if}

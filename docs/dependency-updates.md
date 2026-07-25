@@ -12,7 +12,7 @@
 - `frontend-quality-tooling`: Biome, только minor/patch.
 - `sqlite-stack`: `modernc.org/sqlite` и требуемый им `modernc.org/libc`.
 - `wails-stack`: модули Wails v2 и связанные модули Lea Anthony.
-- `golang-x-patches`: только patch-обновления `golang.org/x/*`.
+- `golang-x-routine`: minor/patch-обновления связанного набора `golang.org/x/*`.
 - `actions-routine`: только официальные `actions/*`, minor/patch.
 
 Все остальные зависимости остаются отдельными PR. Major-обновления не
@@ -20,6 +20,30 @@
 
 Security updates не группируются с обычными version updates: их нужно
 рассматривать срочно и отдельно.
+
+
+## Новые advisory без изменения исходников
+
+`govulncheck` использует обновляемую Go Vulnerability Database. Поэтому
+ранее зелёный commit может начать падать после публикации нового advisory:
+это новый результат проверки безопасности, а не недетерминированная сборка.
+
+При таком падении:
+
+1. проверьте, что отчёт содержит достижимый symbol trace;
+2. обновите затронутый модуль как минимум до версии из `Fixed in`;
+3. выполните `go mod tidy`, `just deps-verify`, `just test-all` и
+   `just security-check`;
+4. не подавляйте advisory и не помечайте security job как
+   `continue-on-error`.
+
+Для модулей с версиями `v0.x` исправление может быть minor-обновлением,
+поэтому routine-группа `golang.org/x/*` принимает minor и patch. Security
+updates при этом остаются отдельными срочными PR.
+
+Workflow `Security / govulncheck` запускается для push, pull request,
+вручную и ежедневно по расписанию. Он должен быть required check для
+защищённой ветки `main`.
 
 ## Обязательные проверки
 

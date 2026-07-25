@@ -101,8 +101,18 @@ onMount(() => {
 });
 </script>
 
-<div class="doctor-overlay" role="presentation" on:pointerdown={(event) => event.target === event.currentTarget && close()}>
-	<section class="doctor-modal" role="dialog" aria-modal="true" aria-labelledby="doctor-title" on:pointerdown|stopPropagation>
+<div
+	class="doctor-overlay"
+	role="presentation"
+	on:pointerdown={(event) => event.target === event.currentTarget && close()}
+>
+	<div
+		class="doctor-modal"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="doctor-title"
+		tabindex="-1"
+	>
 		<header class="doctor-header">
 			<div class="doctor-title-wrap">
 				<div class="doctor-icon"><Stethoscope size={19} /></div>
@@ -129,7 +139,7 @@ onMount(() => {
 						{:else if row.status === "repairable"}
 							<Wrench size={17} />
 						{:else}
-							<LoaderCircle class="doctor-spinner" size={18} />
+							<span class="doctor-spinner"><LoaderCircle size={18} /></span>
 						{/if}
 					</div>
 					<div class="doctor-row-copy">
@@ -139,7 +149,7 @@ onMount(() => {
 					</div>
 					<div class="doctor-row-action">
 						{#if row.status === "pending" || row.status === "checking"}
-							<div class="doctor-status testing-status"><LoaderCircle class="doctor-spinner" size={15} /> Проверка</div>
+							<div class="doctor-status testing-status"><span class="doctor-spinner"><LoaderCircle size={15} /></span> Проверка</div>
 					{:else if row.status === "repairable" && row.repairable}
 							<button type="button" class="doctor-fix" on:click={() => repair(definition.id)} disabled={Boolean(repairing)}>
 								{repairing === definition.id ? "Исправляем…" : doctorStatusLabel(row)}
@@ -155,7 +165,7 @@ onMount(() => {
 		<footer class="doctor-footer">
 			<span>Автоисправление загружает зависимости только в папку данных Ray Player и не требует прав администратора.</span>
 		</footer>
-	</section>
+	</div>
 </div>
 
 <style>
@@ -254,7 +264,7 @@ onMount(() => {
 	.blocked .doctor-status { color: #ff6961; }
 	.testing-status { display: flex; align-items: center; gap: 6px; color: #8e8e93; }
 	.doctor-fix { padding: 7px 11px; border-radius: 9px; background: rgba(255, 214, 10, .14); color: #ffd60a; font-size: 12px; font-weight: 620; }
-	.doctor-spinner { animation: doctor-spin .9s linear infinite; }
+	.doctor-spinner { display: inline-flex; animation: doctor-spin .9s linear infinite; }
 	.doctor-footer { padding: 10px 18px 15px; color: rgba(184,190,202,.52); font-size: 10px; line-height: 1.4; border-top: 1px solid rgba(255,255,255,.05); }
 	@keyframes doctor-spin { to { transform: rotate(360deg); } }
 	@media (prefers-reduced-motion: reduce) { .doctor-spinner { animation-duration: 1.8s; } }

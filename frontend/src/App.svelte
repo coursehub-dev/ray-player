@@ -2590,12 +2590,12 @@ $: playerSubline = playingPodcast
 	class:doctor-open={showDoctor}
 	on:pointerdown={(e) => e.target === e.currentTarget && (showSettings = false)}
     >
-        <section
+        <div
             class="settings-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
-            on:click|stopPropagation
+            tabindex="-1"
         >
             <header class="settings-header">
                 <div class="settings-header-copy">
@@ -3021,7 +3021,7 @@ $: playerSubline = playingPodcast
                     >Сохранить и применить</button
                 >
             </footer>
-        </section>
+        </div>
     </div>
 {/if}
 

@@ -36,11 +36,12 @@ updates:
         update-types:
           - minor
           - patch
-      golang-x-patches:
+      golang-x-routine:
         applies-to: version-updates
         patterns:
           - "golang.org/x/*"
         update-types:
+          - minor
           - patch
 
   - package-ecosystem: npm

@@ -58,7 +58,7 @@ deps-verify:
 
 # Проверить достижимые уязвимости Go-кода закреплённой версией govulncheck.
 security-check: frontend-build
-    go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+    ./scripts/run-govulncheck.sh
 
 # Форматировать Go и frontend вручную.
 format:
