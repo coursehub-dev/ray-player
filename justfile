@@ -5,6 +5,10 @@ export CGO_CFLAGS_ALLOW := "-Xpreprocessor"
 default:
     @just --list
 
+# Установить Wails CLI той же версии, что и модуль в go.mod.
+wails-install:
+    ./scripts/install-wails-cli.sh
+
 # Ray Player - Разработка
 dev:
     wails dev
@@ -47,6 +51,14 @@ deps:
     go run ./cmd/ray_deps check
     @echo "Runtime dependencies are ready and verified"
 
+# Проверить целостность Go-модулей и связку modernc SQLite/libc.
+deps-verify:
+    go mod verify
+    ./scripts/check-sqlite-libc-version.sh
+
+# Проверить достижимые уязвимости Go-кода закреплённой версией govulncheck.
+security-check: frontend-build
+    go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
 # Форматировать Go и frontend вручную.
 format:
@@ -89,7 +101,7 @@ vet: frontend-build
     go vet ./...
 
 # Полный локальный quality gate перед коммитом.
-test-all: format-check test-frontend frontend-build vet test test-cover
+test-all: format-check deps-verify test-frontend frontend-build vet test test-cover
     @echo "All quality gates passed"
 
 # Ray Player - Очистка кэша тестов и запуск

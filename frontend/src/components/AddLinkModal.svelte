@@ -1,6 +1,6 @@
 <script>
 import { createEventDispatcher, tick } from "svelte";
-import { Link, LoaderCircle, X } from "lucide-svelte";
+import { Link, LoaderCircle, X } from "@lucide/svelte";
 
 export let open = false;
 export let libraryType = "music";

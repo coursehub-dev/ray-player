@@ -1,6 +1,6 @@
 <script>
 import { createEventDispatcher } from "svelte";
-import { GripVertical, LoaderCircle, Pause, Play, Sparkles } from "lucide-svelte";
+import { GripVertical, LoaderCircle, Pause, Play, Sparkles } from "@lucide/svelte";
 import TrackMetaLine from "./TrackMetaLine.svelte";
 
 export let item;

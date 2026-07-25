@@ -1,6 +1,6 @@
 <script>
 import { createEventDispatcher, onMount } from "svelte";
-import { CheckCircle2, CircleAlert, LoaderCircle, Stethoscope, Wrench, X } from "lucide-svelte";
+import { CheckCircle2, CircleAlert, LoaderCircle, Stethoscope, Wrench, X } from "@lucide/svelte";
 import { api } from "../lib/api";
 import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "../lib/doctorUi";
 

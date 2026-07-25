@@ -57,7 +57,7 @@ import {
 	Trash2,
 	Link,
 	Stethoscope,
-} from "lucide-svelte";
+} from "@lucide/svelte";
 
 let appState = {
 	library: [],

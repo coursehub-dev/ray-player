@@ -61,7 +61,7 @@ go version
 
 ## Разработка и вклад
 
-Инструкция для разработчиков, правила ML-изменений и pipeline Pull Request находятся в [CONTRIBUTING.md](CONTRIBUTING.md).
+Инструкция для разработчиков, правила ML-изменений и pipeline Pull Request находятся в [CONTRIBUTING.md](CONTRIBUTING.md). Политика обновления зависимостей и Dependabot описана в [docs/dependency-updates.md](docs/dependency-updates.md).
 
 Frontend toolchain проекта — Node.js 24 LTS и npm 11. Точная reference
 версия CI указана в `.node-version`; любой совместимый Node.js 24.x
@@ -109,9 +109,9 @@ macOS-архив по умолчанию не notarized. Для публично
 Код проекта распространяется по GNU General Public License v3. Полный текст — [LICENSE.md](LICENSE.md). Лицензии сторонних моделей и библиотек перечислены отдельно в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### 2. Призови Wails
-Wails — наш главный дирижер. Установи его одной командой:
+Wails — наш главный дирижер. Установи CLI той же версии, что и модуль в `go.mod`:
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+just wails-install
 ```
 
 ### 3. Волшебная палочка: Just

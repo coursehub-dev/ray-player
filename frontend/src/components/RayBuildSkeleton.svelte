@@ -1,5 +1,5 @@
 <script>
-import { LoaderCircle, Sparkles } from "lucide-svelte";
+import { LoaderCircle, Sparkles } from "@lucide/svelte";
 
 export let rows = 7;
 export let seedTitle = "";

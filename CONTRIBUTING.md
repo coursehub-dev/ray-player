@@ -20,7 +20,7 @@ Node.js 22 для этого репозитория не требуется.
 Установка Wails CLI:
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+just wails-install
 wails doctor
 ```
 
@@ -77,6 +77,17 @@ npm install --package-lock-only --strict-peer-deps
 npm ci --strict-peer-deps
 npm run deps:check
 cd ..
+```
+
+Подробная политика группировки, проверки и принятия bot PR описана в
+[`docs/dependency-updates.md`](docs/dependency-updates.md).
+
+Для любого dependency PR дополнительно выполните:
+
+```bash
+just deps-verify
+just security-check
+```
 
 Корневой Go package встраивает `frontend/dist` через `go:embed`.
 Поэтому перед прямым `go vet ./...`, `go test ./...` или `go build`
@@ -88,7 +99,6 @@ just frontend-build
 
 Recipes `just vet`, `just test`, `just test-cover`, `just test-race` и
 `just test-all` выполняют этот prerequisite автоматически.
-```
 
 ## 4. Разработка
 
@@ -109,6 +119,8 @@ just frontend-build       # production-сборка Svelte
 just vet                  # go vet
 just format               # gofmt и Biome
 just deps-check           # smoke-test runtime и моделей
+just deps-verify          # go mod verify + SQLite/libc contract
+just security-check       # govulncheck
 just audio-probe /path/to/audio
 ```
 
