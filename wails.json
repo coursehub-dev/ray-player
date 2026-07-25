@@ -2,7 +2,7 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "ray-player1",
   "outputfilename": "ray-player1",
-  "frontend:install": "npm ci",
+  "frontend:install": "npm ci --strict-peer-deps",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",

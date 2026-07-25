@@ -36,20 +36,22 @@ jobs:
         run: ./scripts/check-go-format.sh
       - name: Check frontend formatting and lint
         run: ./scripts/check-frontend-quality.sh
+      - name: Frontend tests
+        run: npm --prefix frontend test
+      - name: Build frontend assets for Go embed
+        run: npm --prefix frontend run build
+      - name: Verify frontend embed artifact
+        run: ./scripts/check-frontend-dist.sh
+      - name: Verify Go modules
+        run: go mod verify
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
-      - name: Verify Go modules
-        run: go mod verify
       - name: Vet
         run: go vet ./...
       - name: Go tests
         run: go test -count=1 -cover ./...
-      - name: Frontend tests
-        run: npm --prefix frontend test
-      - name: Frontend production build
-        run: npm --prefix frontend run build
 
   artifact-roundtrip:
     runs-on: ubuntu-24.04

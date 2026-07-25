@@ -64,15 +64,15 @@ hooks:
     @echo "Git hooks enabled from .githooks"
 
 # Ray Player - Тесты
-test:
+test: frontend-build
     go test -count=1 ./...
 
 # Ray Player - Тесты с детектором гонок
-test-race:
+test-race: frontend-build
     go test -count=1 -race ./...
 
 # Отчёт покрытия Go-пакетов.
-test-cover:
+test-cover: frontend-build
     go test -count=1 -cover ./...
 
 # Pure-JS тесты frontend state machine / UI contracts / EmoFlow.
@@ -82,17 +82,18 @@ test-frontend:
 # Проверка production-сборки Svelte/Vite.
 frontend-build:
     npm --prefix frontend run build
+    ./scripts/check-frontend-dist.sh
 
 # Статический анализ Go.
-vet:
+vet: frontend-build
     go vet ./...
 
 # Полный локальный quality gate перед коммитом.
-test-all: format-check vet test test-cover test-frontend frontend-build
+test-all: format-check test-frontend frontend-build vet test test-cover
     @echo "All quality gates passed"
 
 # Ray Player - Очистка кэша тестов и запуск
-test-clean:
+test-clean: frontend-build
     go clean -testcache
     go test -count=1 ./...
 

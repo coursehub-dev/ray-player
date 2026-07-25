@@ -7,11 +7,15 @@
 Обязательные инструменты:
 
 - Go версии, указанной в `go.mod`;
-- Node.js версии, указанной в `.node-version`;
-- npm версии, указанной в `frontend/package.json` в поле `packageManager`;
+- Node.js 24.x; CI/reference patch указан в `.node-version`;
+- npm 11.x; canonical версия для lock-файла указана в
+  `frontend/package.json` в поле `packageManager`;
 - Wails CLI той же major/minor-ветки, что и зависимость `github.com/wailsapp/wails/v2`;
 - `just`;
 - системные зависимости Wails для вашей ОС.
+
+Node.js 24 уже является основным project toolchain. Переключаться на
+Node.js 22 для этого репозитория не требуется.
 
 Установка Wails CLI:
 
@@ -25,7 +29,7 @@ wails doctor
 ```bash
 git clone https://github.com/coursehub-dev/ray-player.git
 cd ray-player
-npm ci --prefix frontend
+npm ci --prefix frontend --strict-peer-deps
 just hooks
 just deps
 ```
@@ -52,7 +56,9 @@ git switch -c fix/short-description
 - Не коммитьте приватные музыкальные файлы, пользовательскую БД, логи, токены и абсолютные пути.
 - Не меняйте сгенерированные Wails bindings вручную как единственный источник изменения. Обновите Go API и запустите `just dev`, чтобы bindings были перегенерированы.
 - Для новой бизнес-логики сначала добавляйте тест, воспроизводящий требуемое поведение.
-- Не добавляйте сетевые действия в git hooks. Pre-commit проекта только проверяет `gofmt`.
+- Не добавляйте сетевые действия в git hooks. Pre-commit проекта проверяет
+  `gofmt`, а при staged frontend-изменениях — уже установленный локальный
+  Biome; hook не выполняет `npm install`.
 - Новые внешние зависимости должны иметь понятную необходимость и совместимую лицензию.
 
 Frontend toolchain `svelte`, `@sveltejs/vite-plugin-svelte` и `vite`
@@ -71,6 +77,17 @@ npm install --package-lock-only --strict-peer-deps
 npm ci --strict-peer-deps
 npm run deps:check
 cd ..
+
+Корневой Go package встраивает `frontend/dist` через `go:embed`.
+Поэтому перед прямым `go vet ./...`, `go test ./...` или `go build`
+нужно создать frontend artifact:
+
+```bash
+just frontend-build
+```
+
+Recipes `just vet`, `just test`, `just test-cover`, `just test-race` и
+`just test-all` выполняют этот prerequisite автоматически.
 ```
 
 ## 4. Разработка

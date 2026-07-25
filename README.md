@@ -63,10 +63,14 @@ go version
 
 Инструкция для разработчиков, правила ML-изменений и pipeline Pull Request находятся в [CONTRIBUTING.md](CONTRIBUTING.md).
 
+Frontend toolchain проекта — Node.js 24 LTS и npm 11. Точная reference
+версия CI указана в `.node-version`; любой совместимый Node.js 24.x
+принимается `engines`.
+
 Быстрый старт:
 
 ```bash
-npm ci --prefix frontend
+npm ci --prefix frontend --strict-peer-deps
 just hooks
 just deps
 just dev
