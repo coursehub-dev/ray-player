@@ -1,4 +1,6 @@
 <script>
+import clsx from "clsx";
+
 export let active = false;
 export let disabled = false;
 export let title = "";
@@ -8,8 +10,7 @@ export let type = "button";
 
 <button
   {type}
-  class={`icon-button ${className}`}
-  class:active
+  class={clsx("icon-button", className, { active })}
   {disabled}
   aria-label={title}
   title={title}

@@ -1,4 +1,5 @@
 <script>
+import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
 import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "../lib/sliderUi.js";
 
@@ -108,9 +109,10 @@ function handleKeydown(event) {
 
 	<div
 		bind:this={trackEl}
-		class:dragging
-		class:accent-reactive={accentReactive}
-		class="media-slider-hitarea"
+		class={clsx("media-slider-hitarea", {
+			dragging,
+			"accent-reactive": accentReactive,
+		})}
 		role="slider"
 		tabindex={disabled ? -1 : 0}
 		aria-label={label || "Значение"}

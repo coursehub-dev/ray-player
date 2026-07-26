@@ -1,4 +1,6 @@
 <script>
+import clsx from "clsx";
+
 export let primary = false;
 export let compact = false;
 export let disabled = false;
@@ -8,9 +10,7 @@ export let className = "";
 
 <button
   {type}
-  class={`ui-button ${className}`}
-  class:primary
-  class:compact
+  class={clsx("ui-button", className, { primary, compact })}
   {disabled}
   on:click
 >

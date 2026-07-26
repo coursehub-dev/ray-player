@@ -1,4 +1,5 @@
 <script>
+import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
 
 export let checked = false;
@@ -29,10 +30,7 @@ const handleKeydown = (event) => {
 };
 </script>
 
-<div
-    class="settings-switch-row"
-    class:disabled
->
+<div class={clsx("settings-switch-row", { disabled })}>
     <button
         type="button"
         class="settings-switch-copy"
@@ -48,8 +46,7 @@ const handleKeydown = (event) => {
 
     <button
         type="button"
-        class="ios-switch"
-        class:checked
+        class={clsx("ios-switch", { checked })}
         role="switch"
         aria-checked={checked}
         aria-label={title}

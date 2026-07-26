@@ -16,16 +16,13 @@ import {
 	unbindSnapshotEvents,
 } from "./stores/app";
 import { cssVariables, emoFlowState, syncEmoFlowFromPayload } from "./stores/emoflow";
-import IconButton from "./components/IconButton.svelte";
-import UIButton from "./components/UIButton.svelte";
-import UISlider from "./components/UISlider.svelte";
+import { IconButton, UIButton, UISlider, SettingsSwitch } from "./shared/ui";
 import TrackMetaLine from "./components/TrackMetaLine.svelte";
 import RayTrackRow from "./components/RayTrackRow.svelte";
 import RayBuildSkeleton from "./components/RayBuildSkeleton.svelte";
 import PodcastProgressBar from "./components/PodcastProgressBar.svelte";
 import AddLinkModal from "./components/AddLinkModal.svelte";
 import DoctorModal from "./components/DoctorModal.svelte";
-import SettingsSwitch from "./components/SettingsSwitch.svelte";
 import { api } from "./lib/api";
 import { isPodcastItemId } from "./lib/mediaIdentity";
 import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./lib/playerUi";
