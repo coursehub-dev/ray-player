@@ -1,6 +1,11 @@
 set dotenv-load := true
 export CGO_CFLAGS_ALLOW := "-Xpreprocessor"
 
+# Windows: без sh (Git Bash). macOS/Linux не затрагиваются — там остаётся sh.
+# Bypass — только для процесса just, системный ExecutionPolicy не меняется.
+[windows]
+set shell := ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+
 # Показать доступные команды.
 default:
     @just --list
@@ -12,6 +17,12 @@ wails-install:
 # Ray Player - Разработка
 dev:
     wails dev
+
+# Windows: CGO + MinGW (WinLibs) PATH, затем wails dev.
+# MinGW: PATH / RAY_MINGW_BIN / WinGet BrechtSanders.WinLibs*.
+# macOS/Linux: используйте `just dev`.
+dev-win:
+    ./scripts/dev.ps1
 
 # Ray Player - Обычная сборка (использует уже доступные runtime/model assets).
 build:
