@@ -10,3 +10,8 @@ dev-docs/
 
 # Downloaded runtime/model assets are local-only and reproducible via `just deps`.
 assets/runtime/
+
+# TODO: temporary local dumps — revisit whether to track or fetch via `just deps`
+assets/assets/models/essentia/
+assets/assets/models/minilm/
+assets/assets/onnxruntime-win-x64-1.26.0/
