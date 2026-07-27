@@ -1,13 +1,13 @@
-export function podcastMeta(item: { series?: string; author?: string; folder?: string } | null | undefined): string {
+import type { PodcastItem } from "./types";
+
+export function podcastMeta(item: Pick<PodcastItem, "series" | "author" | "folder"> | null | undefined): string {
 	if (!item) return "";
 	return [item.series || item.author, item.folder].filter(Boolean).join(" · ");
 }
 
-export function podcastProgress(item: {
-	completedRatio?: number;
-	lastPosition?: number;
-	duration?: number;
-} | null | undefined): number {
+export function podcastProgress(
+	item: Pick<PodcastItem, "completedRatio" | "lastPosition" | "duration"> | null | undefined,
+): number {
 	if (!item) {
 		return 0;
 	}

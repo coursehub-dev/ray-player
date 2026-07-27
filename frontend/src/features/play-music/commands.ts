@@ -1,4 +1,4 @@
-import { api } from "../../lib/api";
+import { api } from "../../shared/api";
 import { applyPlaybackPatch } from "../playback";
 import { state, syncPayload, toast } from "../../stores/app";
 import { syncEmoFlowFromPayload } from "../../stores/emoflow";

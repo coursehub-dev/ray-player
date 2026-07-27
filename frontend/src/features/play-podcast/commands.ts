@@ -1,4 +1,4 @@
-import { api } from "../../lib/api";
+import { api } from "../../shared/api";
 import { syncPayload } from "../../stores/app";
 
 export async function playPodcastItem(itemId: string, fromRay = false) {

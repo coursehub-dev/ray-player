@@ -1,3 +1,5 @@
+export type { PodcastHistoryEntry, PodcastItem } from "./types";
+export { isPodcastItemId } from "./identity";
 export {
 	podcastContentLabels,
 	podcastHistorySourceLabel,

@@ -1,5 +1,5 @@
 import { get } from "svelte/store";
-import { api } from "../../lib/api";
+import { api } from "../../shared/api";
 import { playbackState, type PlaybackState } from "../../entities/playback";
 import { state, syncPayload } from "../../stores/app";
 

@@ -63,8 +63,8 @@ import {
 	toggleMute as playbackToggleMute,
 	togglePause as playbackTogglePause,
 } from "./features/playback";
-import { api } from "./lib/api";
-import { isPodcastItemId } from "./lib/mediaIdentity";
+import { api } from "./shared/api";
+import { isPodcastItemId } from "./entities/podcast";
 import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./lib/playerUi";
 import { externalDownloads, putExternalDownload, mergedDownloadState } from "./stores/externalDownloads";
 import {

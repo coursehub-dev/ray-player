@@ -1,8 +1,8 @@
 import { writable, get } from "svelte/store";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
-import { api } from "../lib/api";
+import { api } from "../shared/api";
 import { emoFlowState, syncEmoFlowFromPayload } from "./emoflow";
-import { isPodcastItemId } from "../lib/mediaIdentity";
+import { isPodcastItemId } from "../entities/podcast";
 import { bindExternalDownloadEvents, unbindExternalDownloadEvents } from "./externalDownloads";
 import { playbackState, syncPlayback } from "../entities/playback";
 
