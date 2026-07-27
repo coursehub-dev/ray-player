@@ -5,3 +5,4 @@ export {
 	musicRaySortLabel,
 	musicSortLabels,
 } from "./labels";
+export { default as RayTrackRow } from "./ui/RayTrackRow.svelte";

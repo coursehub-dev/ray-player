@@ -17,8 +17,8 @@ import {
 } from "./stores/app";
 import { cssVariables, emoFlowState } from "./stores/emoflow";
 import { UISlider, SettingsSwitch } from "./shared/ui";
-import AddLinkModal from "./components/AddLinkModal.svelte";
-import DoctorModal from "./components/DoctorModal.svelte";
+import { AddLinkModal } from "./features/external-link";
+import { DoctorModal } from "./pages/settings";
 import { PlayerBar } from "./widgets/player-bar";
 import { SearchPage } from "./pages/search";
 import { HistoryPage } from "./pages/history";

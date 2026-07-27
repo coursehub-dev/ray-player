@@ -1,8 +1,8 @@
 <script lang="ts">
 import { createEventDispatcher, onMount } from "svelte";
 import { CheckCircle2, CircleAlert, LoaderCircle, Stethoscope, Wrench, X } from "@lucide/svelte";
-import { api } from "../shared/api";
-import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "../lib/doctorUi";
+import { api } from "../../shared/api";
+import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "../../lib/doctorUi";
 
 export let settings: Record<string, any> = {};
 

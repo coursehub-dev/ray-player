@@ -7,9 +7,9 @@ import {
 	Trash2,
 } from "@lucide/svelte";
 import { IconButton, UIButton } from "../../shared/ui";
-import RayTrackRow from "../../components/RayTrackRow.svelte";
-import RayBuildSkeleton from "../../components/RayBuildSkeleton.svelte";
-import PodcastProgressBar from "../../components/PodcastProgressBar.svelte";
+import { RayTrackRow } from "../../entities/ray";
+import { PodcastProgressBar } from "../../entities/podcast";
+import { RayBuildSkeleton } from "../../widgets/ray-build-panel";
 
 export let libraryMode: string = "music";
 export let appState: any = {};

@@ -10,8 +10,8 @@ import {
 	FileText,
 } from "@lucide/svelte";
 import { IconButton } from "../../shared/ui";
-import TrackMetaLine from "../../components/TrackMetaLine.svelte";
-import PodcastProgressBar from "../../components/PodcastProgressBar.svelte";
+import { TrackMetaLine } from "../../entities/track";
+import { PodcastProgressBar } from "../../entities/podcast";
 
 export let libraryMode: string = "music";
 export let appState: any = {};

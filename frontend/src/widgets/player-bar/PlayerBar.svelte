@@ -13,7 +13,7 @@ import {
 	Repeat,
 } from "@lucide/svelte";
 import { IconButton, UIButton, UISlider } from "../../shared/ui";
-import TrackMetaLine from "../../components/TrackMetaLine.svelte";
+import { TrackMetaLine } from "../../entities/track";
 
 export let playerTitle = "";
 export let playingPodcast = false;

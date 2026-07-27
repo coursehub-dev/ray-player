@@ -8,3 +8,4 @@ export {
 	podcastSortLabels,
 } from "./labels";
 export { podcastMeta, podcastProgress, podcastProgressPercent } from "./helpers";
+export { default as PodcastProgressBar } from "./ui/PodcastProgressBar.svelte";

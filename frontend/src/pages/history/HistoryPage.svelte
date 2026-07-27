@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Settings, Play, Pause, Sparkles } from "@lucide/svelte";
 import { IconButton } from "../../shared/ui";
-import TrackMetaLine from "../../components/TrackMetaLine.svelte";
+import { TrackMetaLine } from "../../entities/track";
 
 export let libraryMode: string = "music";
 export let appState: any = {};
