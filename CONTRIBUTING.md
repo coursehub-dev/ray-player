@@ -34,8 +34,20 @@ just hooks
 just deps
 ```
 
-`just deps` загружает управляемые FFmpeg, ONNX Runtime, MiniLM и Essentia-модели в пользовательскую папку Ray Player и выполняет smoke-test. Не добавляйте локальные абсолютные пути в коммиты.
+Затем live-reload:
 
+```bash
+# macOS / Linux
+just dev
+
+# Windows
+just dev-win
+# или: .\scripts\dev.ps1
+```
+
+На Windows `just` использует PowerShell (`[windows] set shell` в `justfile`), поэтому `sh`/Git Bash не обязателен для `dev-win`. macOS и Linux не затрагиваются. Для Windows также нужен MinGW (`gcc`): WinGet `BrechtSanders.WinLibs.POSIX.UCRT` или `$env:RAY_MINGW_BIN`.
+
+`just deps` загружает управляемые FFmpeg, ONNX Runtime, MiniLM и Essentia-модели в пользовательскую папку Ray Player и выполняет smoke-test. Не добавляйте локальные абсолютные пути в коммиты.
 ## 2. Перед началом работы
 
 1. Найдите или создайте issue с описанием ошибки или изменения.

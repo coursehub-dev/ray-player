@@ -76,6 +76,8 @@ just deps
 just dev
 ```
 
+На **Windows** для live-reload используйте `just dev-win` (CGO + MinGW) или напрямую `.\scripts\dev.ps1`. Рецепт `justfile` на Windows запускается через PowerShell; macOS/Linux по-прежнему используют `sh`.
+
 Перед PR:
 
 ```bash
@@ -151,7 +153,12 @@ just wails-install
 ### Режим Разработчика (Live Reload)
 Меняй код и сразу видишь результат. Чистый кайф! Запускай из корня:
 ```bash
+# macOS / Linux
 just dev
+
+# Windows (CGO + MinGW PATH)
+just dev-win
+# или: .\scripts\dev.ps1
 ```
 
 ### Сборка Финального Артефакта

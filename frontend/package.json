@@ -14,17 +14,21 @@
 		"preview": "vite preview",
 		"format": "biome format --write .",
 		"lint": "biome lint .",
-		"test": "node --test",
+		"test": "node --experimental-strip-types --test",
 		"check": "biome ci --diagnostic-level=error .",
+		"check:types": "svelte-check --tsconfig ./tsconfig.json",
 		"deps:check": "npm ls --depth=0"
 	},
 	"dependencies": {
 		"@lucide/svelte": "1.26.0",
+		"clsx": "2.1.1",
 		"svelte": "5.56.8"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.5",
 		"@sveltejs/vite-plugin-svelte": "7.2.0",
+		"svelte-check": "4.3.4",
+		"typescript": "5.9.3",
 		"vite": "8.1.5"
 	}
 }
