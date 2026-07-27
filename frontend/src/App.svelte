@@ -15,7 +15,7 @@ import {
 	syncPayload,
 	unbindSnapshotEvents,
 } from "./stores/app";
-import { cssVariables, emoFlowState, syncEmoFlowFromPayload } from "./stores/emoflow";
+import { cssVariables, emoFlowState } from "./stores/emoflow";
 import { UISlider, SettingsSwitch } from "./shared/ui";
 import AddLinkModal from "./components/AddLinkModal.svelte";
 import DoctorModal from "./components/DoctorModal.svelte";
@@ -26,7 +26,36 @@ import { RayPage } from "./pages/ray";
 import { RaysPage } from "./pages/rays";
 import { getTrackPlaybackUI } from "./entities/playback";
 import {
-	applyPlaybackPatch,
+	podcastHistorySourceLabel,
+	podcastMeta,
+	podcastProgressPercent,
+	podcastRayContentLabel,
+	podcastRaySortLabel,
+} from "./entities/podcast";
+import { findTrackById as findTrackInLibrary, genreBadge } from "./entities/track";
+import {
+	movePodcastRayItem as movePodcastRayItemCommand,
+	nextPodcast,
+	openPodcastRayHistory as openPodcastRayHistoryCommand,
+	playPodcastItem,
+	previousPodcast,
+	removePodcastRayItem as removePodcastRayItemCommand,
+	setPodcastRayContentMode as setPodcastRayContentModeCommand,
+	setPodcastRaySortMode as setPodcastRaySortModeCommand,
+} from "./features/play-podcast";
+import {
+	applyPlayTrackPayload,
+	moveMusicQueueItem,
+	playTrackBuildingRay,
+	playTrackStartingRay,
+	removeFromMusicQueue,
+	reportPlayRayError,
+	resumeMusicRay,
+	setMusicRayContentMode as setMusicRayContentModeCommand,
+	setMusicRaySortMode as setMusicRaySortModeCommand,
+	skipToQueueTrack,
+} from "./features/play-music";
+import {
 	nextTrack as playbackNextTrack,
 	previousTrack as playbackPreviousTrack,
 	seekTo,
@@ -291,29 +320,6 @@ const setLibraryMode = async (mode) => {
 
 const toggleLibraryMode = () => setLibraryMode(libraryMode === "podcast" ? "music" : "podcast");
 
-const podcastMeta = (item) => [item.series || item.author, item.folder].filter(Boolean).join(" · ");
-
-const podcastProgress = (item) => {
-	if (!item) {
-		return 0;
-	}
-
-	const stored = Number(item.completedRatio);
-	if (Number.isFinite(stored) && stored > 0) {
-		return Math.max(0, Math.min(1, stored));
-	}
-
-	const position = Number(item.lastPosition) || 0;
-	const duration = Number(item.duration) || 0;
-	if (duration <= 0) {
-		return 0;
-	}
-
-	return Math.max(0, Math.min(1, position / duration));
-};
-
-const podcastProgressPercent = (item) => Math.round(podcastProgress(item) * 100);
-
 const externalState = (item) => mergedDownloadState($externalDownloads, item);
 
 const externalPlayable = (item) => {
@@ -345,67 +351,13 @@ const externalStatusLabel = (item) => {
 	}
 };
 
-const podcastContentLabels = {
-	recommended: "Рекомендуемое",
-	explore: "Исследование",
-	current_folder: "Текущая папка",
-};
-
-const podcastHistorySourceLabel = (source) => {
-	switch (source) {
-		case "library":
-			return "Из библиотеки";
-		case "ray":
-			return "Из луча";
-		case "ray_auto":
-			return "Автопереход луча";
-		case "ray_previous":
-			return "Назад по лучу";
-		case "resume":
-			return "Продолжение";
-		default:
-			return "Ручной запуск";
-	}
-};
-
-const podcastRayContentLabel = (mode) => podcastContentLabels[mode] || "Рекомендуемое";
-
-const podcastRaySortLabel = (mode) => podcastSortLabels[mode] || "Рекомендуемое";
-
 const openPodcastRayHistory = async (rayId) => {
-	await syncPayload(api.openPodcastRayHistory(rayId));
+	await openPodcastRayHistoryCommand(rayId);
 	setScreen("rays");
 };
 
 const playPodcastHistoryItem = async (entry) => {
 	await playPodcast(entry.item.id, false);
-};
-
-const podcastSortLabels = {
-	recommended: "Рекомендуемое",
-	name_asc: "Название A → Z",
-	name_desc: "Название Z → A",
-	date_desc: "Сначала новые",
-	date_asc: "Сначала старые",
-	manual: "Ручной порядок",
-};
-
-const musicContentLabels = {
-	stable: "Ровный поток",
-	warm_up: "Разогрев",
-	cool_down: "Снижение",
-	intensify: "Интенсивнее",
-	deepen: "Глубже",
-	explore: "Исследование",
-};
-
-const musicSortLabels = {
-	recommended: "Рекомендуемое",
-	name_asc: "Название A → Z",
-	name_desc: "Название Z → A",
-	date_desc: "Сначала новые",
-	date_asc: "Сначала старые",
-	manual: "Ручной порядок",
 };
 
 const setMusicContentMode = async (mode) => {
@@ -415,7 +367,7 @@ const setMusicContentMode = async (mode) => {
 
 	musicRayUpdating = true;
 	try {
-		await syncPayload(api.setMusicRayContentMode(mode));
+		await setMusicRayContentModeCommand(mode);
 	} finally {
 		musicRayUpdating = false;
 	}
@@ -428,7 +380,7 @@ const setMusicSortMode = async (mode) => {
 
 	musicRayUpdating = true;
 	try {
-		await syncPayload(api.setMusicRaySortMode(mode));
+		await setMusicRaySortModeCommand(mode);
 	} finally {
 		musicRayUpdating = false;
 	}
@@ -448,7 +400,7 @@ const setPodcastContentMode = async (mode) => {
 
 	podcastRayUpdating = true;
 	try {
-		await syncPayload(api.setPodcastRayContentMode(mode));
+		await setPodcastRayContentModeCommand(mode);
 	} finally {
 		podcastRayUpdating = false;
 	}
@@ -460,7 +412,7 @@ const setPodcastSortMode = async (mode) => {
 	}
 	podcastRayUpdating = true;
 	try {
-		await syncPayload(api.setPodcastRaySortMode(mode));
+		await setPodcastRaySortModeCommand(mode);
 	} finally {
 		podcastRayUpdating = false;
 	}
@@ -477,8 +429,7 @@ const playPodcast = async (itemId, fromRay = false) => {
 		return;
 	}
 
-	const payload = fromRay ? await api.playPodcastRayItem(itemId) : await api.playPodcast(itemId);
-	await syncPayload(Promise.resolve(payload));
+	await playPodcastItem(itemId, fromRay);
 	podcastResults = [...(appState.podcasts || [])];
 	setScreen("ray");
 };
@@ -525,7 +476,7 @@ const dropPodcastRayItem = async (event, index) => {
 
 	podcastRayUpdating = true;
 	try {
-		await syncPayload(api.movePodcastRayItem(from, to));
+		await movePodcastRayItemCommand(from, to);
 	} finally {
 		podcastRayUpdating = false;
 	}
@@ -544,7 +495,7 @@ const removePodcastRayItem = async (event, itemId) => {
 	}
 	podcastRayUpdating = true;
 	try {
-		await syncPayload(api.removePodcastRayItem(itemId));
+		await removePodcastRayItemCommand(itemId);
 	} finally {
 		podcastRayUpdating = false;
 	}
@@ -593,7 +544,7 @@ const dropMusicRayItem = async (event, index) => {
 
 	musicRayUpdating = true;
 	try {
-		await syncPayload(api.moveQueueItem(trackId, to));
+		await moveMusicQueueItem(trackId, to);
 	} finally {
 		musicRayUpdating = false;
 	}
@@ -608,7 +559,7 @@ const finishMusicRayDrag = () => {
 
 const playNext = async () => {
 	if (libraryMode === "podcast") {
-		await syncPayload(api.nextPodcast());
+		await nextPodcast();
 		return;
 	}
 	await playbackNextTrack();
@@ -616,7 +567,7 @@ const playNext = async () => {
 
 const playPrevious = async () => {
 	if (libraryMode === "podcast") {
-		await syncPayload(api.previousPodcast());
+		await previousPodcast();
 		return;
 	}
 	await playbackPreviousTrack();
@@ -720,7 +671,7 @@ const startNewRayFromMenu = async () => {
 	const trackId = contextMenu?.trackId;
 	closeTrackMenu();
 	if (!trackId) return;
-	await syncPayload(api.playTrackWithMode(trackId, selectedRayMode));
+	await playTrackStartingRay(trackId, selectedRayMode);
 	await refreshAudit(trackId);
 	setScreen("ray");
 };
@@ -759,30 +710,20 @@ const playOrToggle = async (trackId, targetScreen = null) => {
 	}
 
 	try {
-		const payload = await api.playTrackWithMode(trackId, selectedRayMode);
+		const payload = await playTrackBuildingRay(trackId, selectedRayMode);
 
 		if (requestSeq !== libraryPlayRequestSeq) {
 			return;
 		}
 
-		if (payload?.library) {
-			state.set(payload);
-			if (payload.current?.status) {
-				applyPlaybackPatch(payload.current);
-			}
-			syncEmoFlowFromPayload(payload);
-		}
-
+		applyPlayTrackPayload(payload);
 		await searchCurrentLibrary(query);
 	} catch (error) {
 		if (requestSeq !== libraryPlayRequestSeq) {
 			return;
 		}
 		console.error("play ray failed", error);
-		toast.set({
-			kind: "error",
-			message: error?.message || "Не удалось построить луч",
-		});
+		reportPlayRayError(error);
 	}
 };
 
@@ -800,11 +741,11 @@ const playTrackFromQueue = async (trackId) => {
 		await togglePause();
 		return;
 	}
-	await syncPayload(api.skipToTrackInQueue(trackId));
+	await skipToQueueTrack(trackId);
 };
 
 const resumeRay = async (rayId) => {
-	await syncPayload(api.resumeRay(rayId));
+	await resumeMusicRay(rayId);
 	setScreen("ray");
 };
 const addFolder = async () => {
@@ -821,7 +762,7 @@ const addFiles = async () => {
 	}
 	setScreen("search");
 };
-const removeFromQueue = async (trackId) => syncPayload(api.removeFromQueue(trackId));
+const removeFromQueue = async (trackId) => removeFromMusicQueue(trackId);
 const changeSeek = async (event) => {
 	const pct = Number(event.currentTarget.value);
 	const duration = appState.current?.durationMs || 0;
@@ -1180,13 +1121,8 @@ const debugReindex = async () => {
 	}
 };
 
-const genreBadge = (track) => track?.genreLabel || track?.genrePrimary || "";
-
-const trackById = (id) => (appState.library || []).find((t) => t.id === id);
-const findTrackById = (trackId) => {
-	if (!trackId) return null;
-	return trackById(trackId) || null;
-};
+const trackById = (id) => findTrackInLibrary(appState.library, id);
+const findTrackById = (trackId) => findTrackInLibrary(appState.library, trackId);
 const getTrackUIState = (trackId) => getTrackPlaybackUI($playbackState, trackId);
 const rowIcon = (trackId) => (getTrackUIState(trackId).isActuallyPlaying ? "Ⅱ" : "▶");
 const rowCurrent = (trackId) => getTrackUIState(trackId).isPlayingTrack;
