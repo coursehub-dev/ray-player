@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
 import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "../lib/sliderUi.js";
@@ -10,15 +10,21 @@ export let step = 0.01;
 export let label = "";
 export let disabled = false;
 export let showValue = true;
-export let format = "percent";
+export let format: "percent" | "raw" = "percent";
 export let id = "";
 export let accentReactive = false;
 
-const dispatch = createEventDispatcher();
+const dispatch = createEventDispatcher<{
+	input: number;
+	preview: number;
+	change: number;
+	commit: number;
+}>();
+
 let dragging = false;
 let localValue = value;
 let dragStartValue = value;
-let trackEl;
+let trackEl: HTMLDivElement | undefined;
 
 $: if (!dragging) localValue = clampSliderValue(value, min, max);
 $: clamped = clampSliderValue(localValue, min, max);
@@ -26,7 +32,7 @@ $: ratio = max > min ? (clamped - min) / (max - min) : 0;
 $: fillPercent = ratio * 100;
 $: displayValue = format === "percent" ? `${Math.round(ratio * 100)}%` : String(clamped);
 
-function valueFromPointer(event) {
+function valueFromPointer(event: PointerEvent) {
 	if (!trackEl) return clamped;
 
 	const rect = trackEl.getBoundingClientRect();
@@ -35,18 +41,18 @@ function valueFromPointer(event) {
 	return snapSliderValue(raw, min, max, step);
 }
 
-function emitPreview(nextValue) {
+function emitPreview(nextValue: number) {
 	localValue = nextValue;
 	dispatch("input", nextValue);
 	dispatch("preview", nextValue);
 }
 
-function emitCommit(nextValue) {
+function emitCommit(nextValue: number) {
 	dispatch("change", nextValue);
 	dispatch("commit", nextValue);
 }
 
-function startDrag(event) {
+function startDrag(event: PointerEvent) {
 	if (disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
 
 	event.preventDefault();
@@ -57,12 +63,12 @@ function startDrag(event) {
 	emitPreview(valueFromPointer(event));
 }
 
-function moveDrag(event) {
+function moveDrag(event: PointerEvent) {
 	if (!dragging || disabled) return;
 	emitPreview(valueFromPointer(event));
 }
 
-function endDrag(event) {
+function endDrag(event: PointerEvent) {
 	if (!dragging || disabled) return;
 
 	const nextValue = valueFromPointer(event);
@@ -72,7 +78,7 @@ function endDrag(event) {
 	trackEl?.releasePointerCapture?.(event.pointerId);
 }
 
-function cancelDrag(event) {
+function cancelDrag(event: PointerEvent) {
 	if (!dragging) return;
 
 	const restoredValue = dragStartValue;
@@ -81,7 +87,7 @@ function cancelDrag(event) {
 	trackEl?.releasePointerCapture?.(event.pointerId);
 }
 
-function handleKeydown(event) {
+function handleKeydown(event: KeyboardEvent) {
 	if (disabled) return;
 
 	const nextValue = sliderValueFromKey({

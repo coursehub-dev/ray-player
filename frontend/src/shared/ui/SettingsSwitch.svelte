@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
 
@@ -7,7 +7,9 @@ export let disabled = false;
 export let title = "";
 export let description = "";
 
-const dispatch = createEventDispatcher();
+const dispatch = createEventDispatcher<{
+	change: { checked: boolean };
+}>();
 
 const toggle = () => {
 	if (disabled) {
@@ -20,7 +22,7 @@ const toggle = () => {
 	});
 };
 
-const handleKeydown = (event) => {
+const handleKeydown = (event: KeyboardEvent) => {
 	if (event.key !== "Enter" && event.key !== " ") {
 		return;
 	}

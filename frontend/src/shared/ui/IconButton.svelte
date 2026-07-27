@@ -1,11 +1,11 @@
-<script>
+<script lang="ts">
 import clsx from "clsx";
 
 export let active = false;
 export let disabled = false;
 export let title = "";
 export let className = "";
-export let type = "button";
+export let type: "button" | "submit" | "reset" = "button";
 </script>
 
 <button
