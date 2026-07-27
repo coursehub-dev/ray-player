@@ -21,6 +21,41 @@
 Security updates не группируются с обычными version updates: их нужно
 рассматривать срочно и отдельно.
 
+## Dependency Review в Pull Request
+
+`actions/dependency-review-action` использует GitHub Dependency Graph и
+REST dependency-review API. Это серверная возможность репозитория: наличие
+`go.mod`, `go.sum` и `package-lock.json` само по себе её не включает.
+
+Workflow сохраняет один стабильный required check `CI / dependency-review`:
+
+- при repository variable `DEPENDENCY_REVIEW_ENABLED=true` запускается
+  строгий GitHub Dependency Review с `fail-on-severity: moderate`;
+- если переменная отсутствует или равна `false`, action не вызывается, потому
+  что на репозитории без Dependency Graph он падает до анализа зависимостей;
+- fallback выполняет `go mod download`, `go mod verify` и `npm audit` по
+  production dependency graph с порогом `moderate`. Он не исполняет npm
+  lifecycle scripts.
+
+Fallback является защитой от инфраструктурного false-negative/false-red CI,
+но не полной заменой GitHub Dependency Review: он проверяет текущее состояние,
+а не diff зависимостей между base/head PR. Поэтому для основного публичного
+репозитория Dependency Graph нужно включить.
+
+Однократная настройка владельцем репозитория:
+
+1. GitHub → `Settings` → `Security` / `Advanced Security` → включить
+   **Dependency graph**.
+2. Дождаться построения graph; обычно это занимает несколько минут.
+3. GitHub → `Settings` → `Secrets and variables` → `Actions` → `Variables` →
+   создать `DEPENDENCY_REVIEW_ENABLED=true`.
+4. Перезапустить PR workflow. После этого инфраструктурная недоступность
+   Dependency Graph снова считается ошибкой, а уязвимость уровня
+   `moderate` и выше блокирует PR.
+
+Не используйте для этого job `continue-on-error` или `warn-only`: они также
+скроют реальные vulnerability findings, а не только отсутствие серверной
+функции GitHub.
 
 ## Новые advisory без изменения исходников
 
