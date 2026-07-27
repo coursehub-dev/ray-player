@@ -38,23 +38,47 @@ func TestTempoCNNContractMatchesEssentiaDefaults(t *testing.T) {
 	}
 }
 
-func TestStandardizeTempoPatchesMatchesPerInferenceTensorScaling(t *testing.T) {
-	patches := [][]float32{{1, 2, 3, 4}, {10, 20, 30, 40}}
+func TestExtractTempoFramesUsesMagnitudeMelBands(t *testing.T) {
+	samples := make([]float64, TempoFFTSize)
+	samples[0] = 2
+	frames := extractTempoFrames(samples)
+	if len(frames) != 1 || len(frames[0]) != TempoMelBands {
+		t.Fatalf("unexpected tempo frames shape=%dx%d", len(frames), func() int {
+			if len(frames) == 0 {
+				return 0
+			}
+			return len(frames[0])
+		}())
+	}
+	for i, value := range frames[0] {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) || value < 0 {
+			t.Fatalf("band=%d invalid magnitude value=%v", i, value)
+		}
+	}
+}
+
+func TestStandardizeTempoPatchesMatchesEssentiaAxisZero(t *testing.T) {
+	patches := [][]float32{
+		{1, 10, 5},
+		{2, 20, 5},
+		{3, 30, 5},
+	}
 	standardizeTempoPatches(patches)
-	for index, patch := range patches {
-		mean := 0.0
-		for _, value := range patch {
-			mean += float64(value)
-		}
-		mean /= float64(len(patch))
-		variance := 0.0
-		for _, value := range patch {
-			d := float64(value) - mean
-			variance += d * d
-		}
-		std := math.Sqrt(variance / float64(len(patch)))
-		if math.Abs(mean) > 1e-6 || math.Abs(std-1) > 1e-6 {
-			t.Fatalf("patch=%d standardized mean=%v std=%v values=%v", index, mean, std, patch)
+
+	want := math.Sqrt(1.5)
+	if math.Abs(float64(patches[0][0])+want) > 1e-6 ||
+		math.Abs(float64(patches[1][0])) > 1e-6 ||
+		math.Abs(float64(patches[2][0])-want) > 1e-6 {
+		t.Fatalf("axis-0 normalization mismatch for coordinate 0: %#v", patches)
+	}
+	if math.Abs(float64(patches[0][1])+want) > 1e-6 ||
+		math.Abs(float64(patches[1][1])) > 1e-6 ||
+		math.Abs(float64(patches[2][1])-want) > 1e-6 {
+		t.Fatalf("axis-0 normalization mismatch for coordinate 1: %#v", patches)
+	}
+	for row := range patches {
+		if patches[row][2] != 0 {
+			t.Fatalf("constant batch coordinate must normalize to zero: %#v", patches)
 		}
 	}
 }

@@ -332,6 +332,14 @@ func (p *MelProcessor) Process(samples []float64) [][]float32 {
 }
 
 func (p *MelProcessor) ProcessEnergy(samples []float64) [][]float32 {
+	return p.processMelBands(samples, true)
+}
+
+func (p *MelProcessor) ProcessMagnitude(samples []float64) [][]float32 {
+	return p.processMelBands(samples, false)
+}
+
+func (p *MelProcessor) processMelBands(samples []float64, power bool) [][]float32 {
 	frameCount := 1 + (len(samples)-p.fftSize)/p.hopSize
 	if frameCount <= 0 {
 		return nil
@@ -343,7 +351,12 @@ func (p *MelProcessor) ProcessEnergy(samples []float64) [][]float32 {
 			frame[i] = samples[start+i] * p.hannWin[i]
 		}
 		spec := fftMagnitudes(frame)
-		mel := applyMelFiltersEnergy(spec, p.melFilters)
+		var mel []float32
+		if power {
+			mel = applyMelFiltersEnergy(spec, p.melFilters)
+		} else {
+			mel = applyMelFiltersMagnitude(spec, p.melFilters)
+		}
 		out = append(out, mel)
 	}
 	return out
@@ -415,13 +428,32 @@ func applyMelFilters(spec []float64, filters [][]float64) []float32 {
 	return out
 }
 
+func applyMelFiltersMagnitude(spec []float64, filters [][]float64) []float32 {
+	out := make([]float32, len(filters))
+	for m := range filters {
+		var magnitude float64
+		limit := len(spec)
+		if len(filters[m]) < limit {
+			limit = len(filters[m])
+		}
+		for i := 0; i < limit; i++ {
+			magnitude += spec[i] * filters[m][i]
+		}
+		out[m] = float32(magnitude)
+	}
+	return out
+}
+
 func applyMelFiltersEnergy(spec []float64, filters [][]float64) []float32 {
 	out := make([]float32, len(filters))
 	for m := range filters {
 		var energy float64
-		for i := range spec {
-			// Essentia MelBands defaults to type=power: the filterbank consumes
-			// squared magnitude even though Spectrum itself returns magnitude.
+		limit := len(spec)
+		if len(filters[m]) < limit {
+			limit = len(filters[m])
+		}
+		for i := 0; i < limit; i++ {
+			// TensorflowInputMusiCNN uses MelBands type=power.
 			energy += spec[i] * spec[i] * filters[m][i]
 		}
 		out[m] = float32(energy)

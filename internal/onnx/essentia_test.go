@@ -3,6 +3,8 @@ package onnx
 import (
 	"math"
 	"testing"
+
+	"ray-player1/internal/analysis"
 )
 
 func TestResolveBaseInputShapeSupportsCurrentDiscogsLayout(t *testing.T) {
@@ -55,6 +57,34 @@ func TestPrepareBaseMelInputPadsToFixedBatch(t *testing.T) {
 	}
 }
 
+func TestPrepareDiscogsPatchInputKeepsPrepatchedTensorExactlyOnce(t *testing.T) {
+	const patches = 35
+	mel := make([]float32, patches*128*96)
+	for i := range mel {
+		mel[i] = float32(i%97) / 97
+	}
+	got, count, err := prepareDiscogsPatchInput(mel, patches, 128, 96)
+	if err != nil {
+		t.Fatalf("prepareDiscogsPatchInput: %v", err)
+	}
+	if count != patches {
+		t.Fatalf("patches=%d want=%d", count, patches)
+	}
+	if len(got) != len(mel) {
+		t.Fatalf("len=%d want=%d", len(got), len(mel))
+	}
+	if len(got) > 0 && &got[0] != &mel[0] {
+		t.Fatal("prepatched input must not be rebuilt or copied")
+	}
+}
+
+func TestPrepareDiscogsPatchInputRejectsMalformedTensor(t *testing.T) {
+	_, _, err := prepareDiscogsPatchInput(make([]float32, 35*128*96-1), 35, 128, 96)
+	if err == nil {
+		t.Fatal("expected strict prepatched contract error")
+	}
+}
+
 func TestAverageHeadPredictionsAveragesPerPatch(t *testing.T) {
 	avg := averageHeadPredictions([]float32{0.1, 0.9, 0.3, 0.7, 0.5, 0.5}, 3)
 	if len(avg) != 2 {
@@ -95,6 +125,32 @@ func TestAggregateRegressionHeadUsesTrimmedMean(t *testing.T) {
 	}
 	if math.Abs(d.Value-0.5) > 0.0001 {
 		t.Fatalf("value=%.4f want=0.5", d.Value)
+	}
+}
+
+func TestApplyHeadPredictionsUsesRawRegressionRows(t *testing.T) {
+	head := &essentiaHead{name: "approachability_regression-discogs-effnet-1"}
+	result := EssentiaOutput{}
+	applyHeadPredictions(
+		&result,
+		"approachability_regression-discogs-effnet-1",
+		head,
+		[]float32{4.2, 3.8, 4.4, 3.9},
+		4,
+	)
+	if result.Approachability != 0.5 {
+		t.Fatalf("invalid regression rows must use neutral fallback, got %.3f", result.Approachability)
+	}
+
+	applyHeadPredictions(
+		&result,
+		"approachability_regression-discogs-effnet-1",
+		head,
+		[]float32{0.2, 0.4, 0.6, 0.8},
+		4,
+	)
+	if math.Abs(result.Approachability-0.5) > 1e-6 {
+		t.Fatalf("valid regression rows value=%.3f want=0.5", result.Approachability)
 	}
 }
 
@@ -181,6 +237,62 @@ func TestRegressionHeadProbeAvoidsBinaryWarnings(t *testing.T) {
 	}
 }
 
+func TestRegressionHeadProbeUsesProductionFallback(t *testing.T) {
+	head := &essentiaHead{name: "approachability_regression-discogs-effnet-1", inputName: "embeddings", outputName: "activations", classes: []string{"approachability"}}
+	report := buildHeadProbe(
+		"approachability_regression-discogs-effnet-1",
+		head,
+		[]float32{4},
+		[]float32{4.1, 4.0, 4.2, 3.9},
+		ProbeOptions{},
+	)
+	if report.Aggregation.ChosenValue != 0.5 || report.Aggregation.ChosenMode != "neutral_fallback" {
+		t.Fatalf("probe must mirror production regression fallback, got %+v", report.Aggregation)
+	}
+}
+
+func TestBuildGenreProbeUsesActualPatchRows(t *testing.T) {
+	classes := []string{"Rock---A", "Pop---B", "Electronic---C"}
+	raw := []float32{
+		0.9, 0.1, 0.2,
+		0.1, 0.8, 0.3,
+	}
+	avg := []float32{0.5, 0.45, 0.25}
+	report := buildGenreProbe(avg, raw, []int64{2, 3}, classes, 2, ProbeOptions{IncludeGenrePatchDebug: true})
+	if len(report.PatchTop) != 2 {
+		t.Fatalf("patch debug rows=%d want=2", len(report.PatchTop))
+	}
+	if len(report.PatchTop[0].Top) == 0 || report.PatchTop[0].Top[0].Label != "Rock / A" {
+		t.Fatalf("first patch top=%+v", report.PatchTop[0])
+	}
+	if len(report.PatchTop[1].Top) == 0 || report.PatchTop[1].Top[0].Label != "Pop / B" {
+		t.Fatalf("second patch top=%+v", report.PatchTop[1])
+	}
+}
+
+func TestProbeFinalFeaturesMirrorProductionMoodThemeFusion(t *testing.T) {
+	jamendo := HeadProbeReport{
+		Name: "mtg_jamendo_moodtheme-discogs-effnet-1",
+		StatsByClass: map[string]Stat{
+			"melodic":   {Mean: 0.6},
+			"soft":      {Mean: 0.5},
+			"heavy":     {Mean: 0.4},
+			"dream":     {Mean: 0.3},
+			"emotional": {Mean: 0.7},
+		},
+	}
+	heads := []HeadProbeReport{
+		jamendo,
+		{Name: "mood_relaxed-discogs-effnet-1", Aggregation: AggregationReport{ChosenValue: 0.5}},
+		{Name: "mood_aggressive-discogs-effnet-1", Aggregation: AggregationReport{ChosenValue: 0.2}},
+		{Name: "tonal_atonal-discogs-effnet-1", Aggregation: AggregationReport{ChosenValue: 0.4}},
+	}
+	features := extractFinalFeatures(EssentiaProbeReport{Heads: heads}, analysis.Features{})
+	if features.Melodic < 0.6 || features.Soft < 0.5 || features.Heavy < 0.4 || features.Dream < 0.3 || features.Emotional < 0.7 {
+		t.Fatalf("probe moodtheme fusion diverged from production: %+v", features)
+	}
+}
+
 func TestMeanEmbeddingKeeps1280Dimensions(
 	t *testing.T,
 ) {
@@ -236,14 +348,15 @@ func TestDecodeTempoOutputAndMajorityVoting(t *testing.T) {
 	}
 }
 
-func TestGenreTagsSuppressNoisyWeakDetails(t *testing.T) {
+func TestGenreTagsSuppressWeakDetailsByEvidenceOnly(t *testing.T) {
 	groups := []GenreGroupCandidate{
 		{
-			Label:        "Rock",
-			Score:        0.22,
-			BestSubLabel: "Rock / Black Metal",
-			BestSubScore: 0.22,
-			Support:      1,
+			Label:          "Rock",
+			Score:          0.22,
+			BestSubLabel:   "Rock / Substyle A",
+			BestSubScore:   0.22,
+			SecondSubScore: 0.20,
+			Support:        1,
 		},
 	}
 	tags := buildGenreTagsForUI(groups, 3)
@@ -254,7 +367,7 @@ func TestGenreTagsSuppressNoisyWeakDetails(t *testing.T) {
 		t.Fatalf("label=%q want Rock", tags[0].Label)
 	}
 	if tags[0].Detail != "" {
-		t.Fatalf("weak noisy detail must be suppressed, got %q", tags[0].Detail)
+		t.Fatalf("weak/ambiguous detail must be suppressed, got %q", tags[0].Detail)
 	}
 }
 
@@ -284,7 +397,7 @@ func TestGenreTagsRequireConfidentPrimary(t *testing.T) {
 			groups := []GenreGroupCandidate{{
 				Label:        "Hip Hop",
 				Score:        test.score,
-				BestSubLabel: "Hip Hop / DJ Battle Tool",
+				BestSubLabel: "Hip Hop / Boom Bap",
 				BestSubScore: test.bestSub,
 				Support:      1,
 			}}
@@ -295,9 +408,23 @@ func TestGenreTagsRequireConfidentPrimary(t *testing.T) {
 	}
 }
 
+func TestGenreTagsDoNotHardcodeLabelDenylist(t *testing.T) {
+	groups := []GenreGroupCandidate{
+		{Label: "Classical", Score: 0.20, BestSubLabel: "Classical / Modern", BestSubScore: 0.20, Support: 4},
+		{Label: "Stage & Screen", Score: 0.12, BestSubLabel: "Stage & Screen / Soundtrack", BestSubScore: 0.12, Support: 3},
+	}
+
+	tags := buildGenreTagsForUI(groups, 3)
+	if len(tags) != 2 {
+		t.Fatalf("model labels must be filtered by numeric evidence, not a text denylist: %#v", tags)
+	}
+	if tags[0].Label != "Classical" || tags[1].Label != "Stage & Screen" {
+		t.Fatalf("unexpected tag order: %#v", tags)
+	}
+}
+
 func TestGenreTagsUseAcceptedPrimaryForSecondaryThreshold(t *testing.T) {
 	groups := []GenreGroupCandidate{
-		{Label: "Non-Music", Score: 0.90, BestSubScore: 0.90, Support: 4},
 		{Label: "Rock", Score: 0.10, BestSubScore: 0.11, Support: 3},
 		{Label: "Electronic", Score: 0.09, BestSubScore: 0.10, Support: 3},
 	}
@@ -312,12 +439,12 @@ func TestGenreTagsUseAcceptedPrimaryForSecondaryThreshold(t *testing.T) {
 
 	result := EssentiaOutput{GenreTags: tags}
 	finalizeGenreResult(&result)
-	if genreResultAccepted(true, result.GenreScore, result.GenreMargin) {
-		t.Fatalf("near-tied genres must fail the confidence gate: score=%.3f margin=%.3f", result.GenreScore, result.GenreMargin)
+	if !genreResultAccepted(true, result.GenreScore, result.GenreMargin) {
+		t.Fatalf("near-tied multi-label genres must remain usable: score=%.3f margin=%.3f", result.GenreScore, result.GenreMargin)
 	}
 }
 
-func TestGenreResultAcceptedRequiresReliableScoreAndMargin(t *testing.T) {
+func TestGenreResultAcceptedRequiresReliableScore(t *testing.T) {
 	tests := []struct {
 		name     string
 		reliable bool
@@ -328,7 +455,7 @@ func TestGenreResultAcceptedRequiresReliableScoreAndMargin(t *testing.T) {
 		{name: "accepted", reliable: true, score: float64(genrePrimaryMinScore), margin: float64(genrePrimaryMinMargin), want: true},
 		{name: "unreliable", reliable: false, score: 1, margin: 1, want: false},
 		{name: "score below threshold", reliable: true, score: float64(genrePrimaryMinScore) - 0.001, margin: 1, want: false},
-		{name: "margin below threshold", reliable: true, score: 1, margin: float64(genrePrimaryMinMargin) - 0.001, want: false},
+		{name: "low margin is ambiguous but usable", reliable: true, score: 1, margin: 0, want: true},
 	}
 
 	for _, test := range tests {
@@ -340,25 +467,54 @@ func TestGenreResultAcceptedRequiresReliableScoreAndMargin(t *testing.T) {
 	}
 }
 
-func TestGenreDetailForUISuppressesKnownWeakCollapseLabels(t *testing.T) {
+func TestGenreDetailForUIUsesGenericScoreAndSeparation(t *testing.T) {
 	for _, tc := range []GenreGroupCandidate{
-		{Label: "Rock", BestSubLabel: "Rock---Black Metal", BestSubScore: 0.22, Support: 4},
-		{Label: "Hip Hop", BestSubLabel: "Hip Hop---DJ Battle Tool", BestSubScore: 0.20, Support: 3},
-		{Label: "Rock", BestSubLabel: "Rock---Pop Rock", BestSubScore: 0.15, Support: 5},
+		{
+			Label:          "Rock",
+			BestSubLabel:   "Rock---Substyle A",
+			BestSubScore:   genreDetailMinScore - 0.001,
+			SecondSubScore: 0.01,
+		},
+		{
+			Label:          "Electronic",
+			BestSubLabel:   "Electronic---Substyle A",
+			BestSubScore:   0.24,
+			SecondSubScore: 0.22,
+		},
 	} {
 		if got := genreDetailForUI(tc); got != "" {
 			t.Fatalf("genreDetailForUI(%+v)=%q want empty", tc, got)
 		}
 	}
+
 	if got := genreDetailForUI(GenreGroupCandidate{
-		Label: "Rock", BestSubLabel: "Rock---Black Metal", BestSubScore: 0.31, Support: 4,
-	}); got != "Rock / Black Metal" {
-		t.Fatalf("strong collapse-prone detail=%q", got)
+		Label:          "Rock",
+		BestSubLabel:   "Rock---Substyle A",
+		BestSubScore:   0.28,
+		SecondSubScore: 0.10,
+	}); got != "Rock / Substyle A" {
+		t.Fatalf("clear substyle detail=%q", got)
 	}
+
 	if got := genreDetailForUI(GenreGroupCandidate{
-		Label: "Electronic", BestSubLabel: "Electronic---Deep House", BestSubScore: 0.19, Support: 3,
-	}); got != "Electronic / Deep House" {
-		t.Fatalf("ordinary detail=%q", got)
+		Label:          "Pop",
+		BestSubLabel:   "Pop---Substyle A",
+		BestSubScore:   genreDetailStrongScore,
+		SecondSubScore: genreDetailStrongScore - 0.01,
+	}); got != "Pop / Substyle A" {
+		t.Fatalf("strong substyle may survive a close runner-up, got %q", got)
+	}
+}
+
+func TestTopGenreGroupsTracksSecondSubstyleEvidence(t *testing.T) {
+	classes := []string{"Pop---A", "Pop---B", "Pop---C"}
+	groups := topGenreGroups([]float32{0.31, 0.22, 0.08}, classes, 3)
+	if len(groups) != 1 {
+		t.Fatalf("groups=%#v", groups)
+	}
+	if math.Abs(float64(groups[0].BestSubScore-0.31)) > 1e-6 ||
+		math.Abs(float64(groups[0].SecondSubScore-0.22)) > 1e-6 {
+		t.Fatalf("unexpected substyle evidence: %+v", groups[0])
 	}
 }
 

@@ -67,6 +67,35 @@ func TestApplyMelFiltersEnergyUsesPowerSpectrum(t *testing.T) {
 	}
 }
 
+func TestApplyMelFiltersMagnitudeUsesMagnitudeSpectrum(t *testing.T) {
+	got := applyMelFiltersMagnitude([]float64{2}, [][]float64{{0.5}})
+	if len(got) != 1 || math.Abs(float64(got[0])-1) > 1e-9 {
+		t.Fatalf("magnitude bands=%v want=1", got)
+	}
+}
+
+func TestProcessMagnitudeAndEnergyUseDifferentSpectralContracts(t *testing.T) {
+	processor := &MelProcessor{
+		fftSize:    4,
+		hopSize:    4,
+		melBands:   1,
+		hannWin:    []float64{1, 1, 1, 1},
+		melFilters: [][]float64{{1, 1, 1}},
+	}
+	samples := []float64{2, 0, 0, 0}
+	magnitude := processor.ProcessMagnitude(samples)
+	power := processor.ProcessEnergy(samples)
+	if len(magnitude) != 1 || len(power) != 1 {
+		t.Fatalf("unexpected frame counts magnitude=%d power=%d", len(magnitude), len(power))
+	}
+	if math.Abs(float64(magnitude[0][0])-6) > 1e-9 {
+		t.Fatalf("magnitude=%v want=6", magnitude[0][0])
+	}
+	if math.Abs(float64(power[0][0])-12) > 1e-9 {
+		t.Fatalf("power=%v want=12", power[0][0])
+	}
+}
+
 func TestMusiCNNFilterbankIsFiniteAndPopulated(t *testing.T) {
 	filters := buildMelFilterbank(EssentiaMelBands, EssentiaFFTSize, EssentiaSampleRate)
 	if len(filters) != EssentiaMelBands {

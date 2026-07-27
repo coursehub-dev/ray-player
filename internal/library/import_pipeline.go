@@ -349,7 +349,7 @@ func (s *Service) upsertCandidate(candidate scanCandidate) (string, error) {
 		return "unchanged", nil
 	}
 	durationMs := quickDurationMs(candidate.path)
-	track := buildTrack(candidate.path, candidate.meta, candidate.metaSource, pseudoFeatures(candidate.path), durationMs)
+	track := buildTrack(candidate.path, candidate.meta, candidate.metaSource, pendingFeatures(), durationMs)
 	track.NormalizedPath = candidate.normalizedPath
 	track.LibraryRootID = candidate.rootID
 	track.ImportStatus = string(ImportReady)

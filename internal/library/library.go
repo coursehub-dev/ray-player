@@ -676,7 +676,7 @@ func (s *Service) importPath(path string, virtual bool) (Track, error) {
 	libLog.I("import file start path=%s", path)
 	meta, metaSource := readMetadata(path)
 	durMs := quickDurationMs(path)
-	track := buildTrack(path, meta, metaSource, pseudoFeatures(path), durMs)
+	track := buildTrack(path, meta, metaSource, pendingFeatures(), durMs)
 	track.AnalyzedLevel = 1
 	track.AnalysisVersion = 0
 	track.AnalysisError = ""
@@ -830,7 +830,7 @@ func (s *Service) analyzeTrack(parent context.Context, job analysisJob) (Track, 
 	features, durMs, featErr := analysis.ExtractWithContext(ctx, job.Path)
 	if featErr != nil {
 		libLog.I("analysis.Extract failed path=%s err=%v", job.Path, featErr)
-		fallback := buildTrack(job.Path, job.Meta, job.Source, pseudoFeatures(job.Path), quickDurationMs(job.Path))
+		fallback := buildTrack(job.Path, job.Meta, job.Source, pendingFeatures(), quickDurationMs(job.Path))
 		fallback.AnalyzedLevel = 1
 		fallback.AnalysisVersion = currentAnalysisVersion
 		fallback.AnalyzedAt = time.Now().Unix()
@@ -1034,7 +1034,7 @@ func buildTrack(path string, meta map[string]string, source string, features ana
 }
 
 func makeFallbackTrack(path string, duration time.Duration) Track {
-	return buildTrack(path, nil, "mock", pseudoFeatures(path), int(duration/time.Millisecond))
+	return buildTrack(path, nil, "mock", mockFeatures(path), int(duration/time.Millisecond))
 }
 
 func TrackFromRow(r db.TrackRow) Track {
@@ -1118,9 +1118,10 @@ func buildTags(t Track) string {
 }
 
 func chooseGenre(metaGenre, mlGenre string) string {
-	// Essentia already applies model-output quality, score and margin gates.
-	// Repeating a stricter threshold here produced contradictory state where
-	// GenreLabel contained an accepted ML genre while GenrePrimary was Unknown.
+	// Essentia owns model-output quality and minimum-evidence gates. Parent
+	// ambiguity is intentionally preserved for the multi-label Discogs head;
+	// recommend.genreTrust() uses the numeric tag margin to reduce its weight.
+	// Do not infer or rewrite ML genres from title/artist/file-name text here.
 	mlGenre = strings.TrimSpace(strings.ReplaceAll(mlGenre, "---", " / "))
 	if mlGenre != "" {
 		return mlGenre
@@ -1159,7 +1160,7 @@ func genreLabelFromTags(tags []onnx.GenreTag, primary, detail string) string {
 		if label == "" {
 			label = strings.TrimSpace(tag.Detail)
 		}
-		if label == "" || strings.EqualFold(label, "unknown") || strings.EqualFold(label, "score") || isNoisyGenreLabel(label) {
+		if label == "" || strings.EqualFold(label, "unknown") {
 			continue
 		}
 		if seen[strings.ToLower(label)] {
@@ -1178,15 +1179,6 @@ func genreLabelFromTags(tags []onnx.GenreTag, primary, detail string) string {
 		return strings.ReplaceAll(detail, "---", " / ")
 	}
 	return strings.TrimSpace(primary)
-}
-
-func isNoisyGenreLabel(label string) bool {
-	switch strings.TrimSpace(label) {
-	case "Non-Music", "Stage & Screen", "Children's", "Brass & Military", "Classical", "Score":
-		return true
-	default:
-		return false
-	}
 }
 
 func trigrams(s string) []string {
@@ -1241,8 +1233,14 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
 
-func pseudoFeatures(seed string) analysis.Features {
-	return analysis.Features{Tempo: pseudoMetric(seed, 80, 138), Energy: pseudoUnit(seed, 11), Danceability: pseudoUnit(seed, 21), Valence: pseudoUnit(seed, 31), Acousticness: pseudoUnit(seed, 41), Instrumentalness: pseudoUnit(seed, 51), Loudness: -12 + pseudoUnit(seed, 61)*8, Embedding: []float32{float32(pseudoUnit(seed, 11)), float32(pseudoUnit(seed, 21)), float32(pseudoUnit(seed, 31)), float32(pseudoUnit(seed, 41))}}
+func pendingFeatures() analysis.Features {
+	// A real file that has not been analyzed has unknown audio semantics. Never
+	// synthesize recommendation features from its path, title or file name.
+	return analysis.Features{}
+}
+
+func mockFeatures(seed string) analysis.Features {
+	return analysis.Features{Tempo: mockMetric(seed, 80, 138), Energy: mockUnit(seed, 11), Danceability: mockUnit(seed, 21), Valence: mockUnit(seed, 31), Acousticness: mockUnit(seed, 41), Instrumentalness: mockUnit(seed, 51), Loudness: -12 + mockUnit(seed, 61)*8, Embedding: []float32{float32(mockUnit(seed, 11)), float32(mockUnit(seed, 21)), float32(mockUnit(seed, 31)), float32(mockUnit(seed, 41))}}
 }
 
 func quickDurationMs(path string) int {
@@ -1301,7 +1299,7 @@ func blendMetric(base, ml, mlWeight float64) float64 {
 	return base*(1-mlWeight) + ml*mlWeight
 }
 
-func pseudoUnit(seed string, salt byte) float64 {
+func mockUnit(seed string, salt byte) float64 {
 	sum := 0
 	for i := 0; i < len(seed); i++ {
 		sum += int(seed[i]) + int(salt)
@@ -1309,7 +1307,7 @@ func pseudoUnit(seed string, salt byte) float64 {
 	return float64(sum%100) / 100.0
 }
 
-func pseudoMetric(seed string, min, max float64) float64 { return min + pseudoUnit(seed, 7)*(max-min) }
+func mockMetric(seed string, min, max float64) float64 { return min + mockUnit(seed, 7)*(max-min) }
 
 func isAudioExt(ext string) bool {
 	switch strings.ToLower(ext) {

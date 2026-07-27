@@ -1035,7 +1035,58 @@ func (s *Service) Recluster(tracks []library.Track) {
 			basis.Combat,
 		)
 	}
+	health := measureClusterHealth(tracks, points, centroids)
+	recommendLog.I(
+		"recluster health valid=%d clusters=%d sizes=%v meanDistance=%.4f maxDistance=%.4f",
+		health.ValidPoints,
+		len(centroids),
+		health.Sizes,
+		health.MeanDistance,
+		health.MaxDistance,
+	)
 	recommendLog.I("recluster done tracks=%d clusters=%d changed=%d mode=emotion ms=%d", len(tracks), len(centroids), changedClusterCount(tracks, before), time.Since(start).Milliseconds())
+}
+
+type clusterHealth struct {
+	ValidPoints  int
+	Sizes        []int
+	MeanDistance float64
+	MaxDistance  float64
+}
+
+func measureClusterHealth(tracks []library.Track, points, centroids [][]float64) clusterHealth {
+	health := clusterHealth{Sizes: make([]int, len(centroids))}
+	if len(centroids) == 0 {
+		return health
+	}
+	totalDistance := 0.0
+	limit := len(tracks)
+	if len(points) < limit {
+		limit = len(points)
+	}
+	for i := 0; i < limit; i++ {
+		if len(points[i]) == 0 {
+			continue
+		}
+		clusterID := tracks[i].ClusterID
+		if clusterID < 0 || clusterID >= len(centroids) {
+			continue
+		}
+		distance := emotionVectorDistance(points[i], centroids[clusterID])
+		if math.IsNaN(distance) || math.IsInf(distance, 0) {
+			continue
+		}
+		health.ValidPoints++
+		health.Sizes[clusterID]++
+		totalDistance += distance
+		if distance > health.MaxDistance {
+			health.MaxDistance = distance
+		}
+	}
+	if health.ValidPoints > 0 {
+		health.MeanDistance = totalDistance / float64(health.ValidPoints)
+	}
+	return health
 }
 
 func changedClusterCount(tracks []library.Track, before map[string]int) int {

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"ray-player1/internal/analysis"
 	"ray-player1/internal/logx"
 
 	ort "ray-player1/internal/onnx/ortshim"
@@ -23,10 +22,33 @@ import (
 var essentiaLog = logx.New("essentia")
 
 const (
-	essentiaEmbeddingSize         = 1280
-	genrePrimaryMinScore  float32 = 0.08
-	genrePrimaryMinMargin float32 = 0.025
+	essentiaEmbeddingSize          = 1280
+	genrePrimaryMinScore   float32 = 0.08
+	genrePrimaryMinMargin  float32 = 0.025
+	genreDetailMinScore    float32 = 0.18
+	genreDetailMinMargin   float32 = 0.04
+	genreDetailStrongScore float32 = 0.35
 )
+
+var jamendoMelodicWeights = map[string]float64{
+	"melodic": 1.00, "emotional": 0.25, "romantic": 0.20, "ballad": 0.15,
+}
+
+var jamendoSoftnessWeights = map[string]float64{
+	"soft": 1.00, "calm": 0.45, "relaxing": 0.45, "meditative": 0.25,
+}
+
+var jamendoHeavinessWeights = map[string]float64{
+	"heavy": 1.00, "powerful": 0.45, "epic": 0.25, "dramatic": 0.20,
+}
+
+var jamendoDreaminessWeights = map[string]float64{
+	"dream": 1.00, "space": 0.35, "soundscape": 0.30, "deep": 0.25, "romantic": 0.15,
+}
+
+var jamendoEmotionalityWeights = map[string]float64{
+	"emotional": 1.00, "melancholic": 0.40, "dramatic": 0.35, "romantic": 0.25, "sad": 0.20,
+}
 
 var essentiaHeadNames = []string{
 	"danceability-discogs-effnet-1",
@@ -121,12 +143,13 @@ type genreCandidate struct {
 }
 
 type GenreGroupCandidate struct {
-	Label        string
-	Score        float32
-	Support      int
-	SumScore     float32
-	BestSubLabel string
-	BestSubScore float32
+	Label          string
+	Score          float32
+	Support        int
+	SumScore       float32
+	BestSubLabel   string
+	BestSubScore   float32
+	SecondSubScore float32
 }
 
 type GenrePrediction struct {
@@ -721,6 +744,7 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 	result.GenreReliable = qualityErr == nil && !quality.Suspicious()
 	result.GenreQuality = quality
 
+	logGenreAmbiguity(result, "static")
 	if !genreResultAccepted(result.GenreReliable, result.GenreScore, result.GenreMargin) {
 		essentiaLog.W(
 			"genre rejected primary=%q detail=%q score=%.4f margin=%.4f reliable=%t",
@@ -751,13 +775,8 @@ func (e *EssentiaEngine) Analyze(ctx context.Context, mel []float32, patches int
 			essentiaLog.D("head empty name=%s", name)
 			continue
 		}
-		avg := averageHeadPredictions(probs, validPatches)
-		if len(avg) == 0 {
-			essentiaLog.D("head avg empty name=%s", name)
-			continue
-		}
-		essentiaLog.T("head ok name=%s prob0=%.4f len=%d avg=%d", name, probs[0], len(probs), len(avg))
-		applyHeadPrediction(&result, name, head, avg)
+		essentiaLog.T("head ok name=%s prob0=%.4f len=%d rows=%d", name, probs[0], len(probs), validPatches)
+		applyHeadPredictions(&result, name, head, probs, validPatches)
 	}
 
 	finalizeDerivedFeatures(&result)
@@ -772,20 +791,21 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		discogsMelBandsVal    = 96
 	)
 
-	frameCount := len(mel) / discogsMelBandsVal
-	if frameCount < discogsPatchFramesVal {
-		frameCount = discogsPatchFramesVal
-	}
-	discogsMel, discogsFrames, err := makeDiscogsMelSpectrogramFromFlat(mel, frameCount, discogsMelBandsVal)
+	patchesFlat, patchCount, err := prepareDiscogsPatchInput(
+		mel,
+		patches,
+		discogsPatchFramesVal,
+		discogsMelBandsVal,
+	)
 	if err != nil {
-		return EssentiaOutput{}, fmt.Errorf("discogs mel prepare: %w", err)
-	}
-	patchesFlat, patchCount := analysis.MakeDiscogsPatches(discogsMel, discogsFrames)
-	if patchCount == 0 {
-		return EssentiaOutput{}, errors.New("no Discogs mel patches produced")
+		return EssentiaOutput{}, err
 	}
 
-	essentiaLog.I("discogs patches=%d len=%d", patchCount, len(patchesFlat))
+	essentiaLog.I(
+		"discogs input contract=prepatched patches=%d len=%d",
+		patchCount,
+		len(patchesFlat),
+	)
 
 	discogsResult, err := e.runDiscogs(patchesFlat, patchCount)
 	if err != nil {
@@ -841,6 +861,7 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 			)
 		}
 
+		logGenreAmbiguity(result, "discogs")
 		if !genreResultAccepted(result.GenreReliable, result.GenreScore, result.GenreMargin) {
 			essentiaLog.W(
 				"discogs genre rejected primary=%q detail=%q score=%.4f margin=%.4f reliable=%t",
@@ -868,11 +889,7 @@ func (e *EssentiaEngine) analyzeWithDiscogs(ctx context.Context, mel []float32, 
 		if len(probs) == 0 {
 			continue
 		}
-		avg := averageHeadPredictions(probs, patchCount)
-		if len(avg) == 0 {
-			continue
-		}
-		applyHeadPrediction(&result, name, head, avg)
+		applyHeadPredictions(&result, name, head, probs, patchCount)
 	}
 
 	finalizeDerivedFeatures(&result)
@@ -973,11 +990,28 @@ func (e *EssentiaEngine) runDiscogs(patches []float32, patchCount int) (struct {
 	return result, nil
 }
 
-func makeDiscogsMelSpectrogramFromFlat(mel []float32, frameCount, melBands int) ([]float32, int, error) {
-	if len(mel) == 0 {
-		return nil, 0, errors.New("empty mel")
+func prepareDiscogsPatchInput(
+	mel []float32,
+	patches int,
+	patchFrames int,
+	melBands int,
+) ([]float32, int, error) {
+	if patches <= 0 {
+		return nil, 0, errors.New("no Discogs mel patches provided")
 	}
-	return mel, frameCount, nil
+	if patchFrames <= 0 || melBands <= 0 {
+		return nil, 0, errors.New("invalid Discogs patch dimensions")
+	}
+	expected := patches * patchFrames * melBands
+	if len(mel) != expected {
+		return nil, 0, fmt.Errorf(
+			"invalid Discogs prepatched mel contract: len=%d patches=%d expected=%d",
+			len(mel),
+			patches,
+			expected,
+		)
+	}
+	return mel, patches, nil
 }
 
 func (e *EssentiaEngine) runHead(ctx context.Context, head *essentiaHead, patchEmbeddings []float32, validPatches int) ([]float32, error) {
@@ -1230,8 +1264,11 @@ func topGenreGroups(probs []float32, classes []string, k int) []GenreGroupCandid
 			groups[parent] = g
 		}
 		if score > g.BestSubScore {
+			g.SecondSubScore = g.BestSubScore
 			g.BestSubScore = score
 			g.BestSubLabel = detail
+		} else if score > g.SecondSubScore {
+			g.SecondSubScore = score
 		}
 		if score >= 0.02 {
 			g.Support++
@@ -1274,7 +1311,7 @@ func buildGenreTagsForUI(groups []GenreGroupCandidate, limit int) []GenreTag {
 			break
 		}
 		label := strings.TrimSpace(g.Label)
-		if label == "" || isNoisyDisplayGenre(label) {
+		if label == "" {
 			continue
 		}
 		if len(tags) == 0 {
@@ -1340,16 +1377,30 @@ func finalizeGenreResult(result *EssentiaOutput) {
 }
 
 func acceptTopGenre(g GenreGroupCandidate) bool {
-	if isNoisyDisplayGenre(g.Label) {
-		return false
-	}
-	return g.Score >= genrePrimaryMinScore
+	return strings.TrimSpace(g.Label) != "" && g.Score >= genrePrimaryMinScore
 }
 
-func genreResultAccepted(reliable bool, score, margin float64) bool {
-	return reliable &&
-		score >= float64(genrePrimaryMinScore) &&
-		margin >= float64(genrePrimaryMinMargin)
+func genreResultAccepted(reliable bool, score, _ float64) bool {
+	// Discogs400 is multi-label. A small parent-to-parent margin means the track
+	// is stylistically ambiguous; it does not mean the top parent has no usable
+	// evidence. Keep the tags and let genreTrust() down-weight the ambiguity.
+	return reliable && score >= float64(genrePrimaryMinScore)
+}
+
+func logGenreAmbiguity(result EssentiaOutput, source string) {
+	if !result.GenreReliable ||
+		result.GenreScore < float64(genrePrimaryMinScore) ||
+		result.GenreMargin >= float64(genrePrimaryMinMargin) {
+		return
+	}
+	essentiaLog.I(
+		"%s genre ambiguous primary=%q label=%q score=%.4f margin=%.4f preserving-tags=true",
+		source,
+		result.GenrePrimary,
+		result.GenreLabel,
+		result.GenreScore,
+		result.GenreMargin,
+	)
 }
 
 func clearGenreResult(result *EssentiaOutput) {
@@ -1365,7 +1416,7 @@ func clearGenreResult(result *EssentiaOutput) {
 }
 
 func acceptSecondaryGenre(g GenreGroupCandidate, topScore float32) bool {
-	if isNoisyDisplayGenre(g.Label) {
+	if strings.TrimSpace(g.Label) == "" {
 		return false
 	}
 	if g.Score < 0.03 {
@@ -1378,15 +1429,6 @@ func acceptSecondaryGenre(g GenreGroupCandidate, topScore float32) bool {
 		return false
 	}
 	return true
-}
-
-func isNoisyDisplayGenre(label string) bool {
-	switch strings.TrimSpace(label) {
-	case "Non-Music", "Stage & Screen", "Children's", "Brass & Military", "Classical", "Score":
-		return true
-	default:
-		return false
-	}
 }
 
 func logPatchStats(mel []float32, validPatches int) {
@@ -1487,23 +1529,19 @@ func parentGenre(label string) string {
 		return ""
 	}
 	parts := strings.Split(label, " / ")
-	parent := strings.TrimSpace(parts[0])
-	if parent == "" || strings.EqualFold(parent, "Score") {
-		return ""
-	}
-	return parent
+	return strings.TrimSpace(parts[0])
 }
 
 func genreDetailForUI(g GenreGroupCandidate) string {
 	detail := cleanGenreLabel(g.BestSubLabel)
-	if detail == "" || g.Support < 2 || g.BestSubScore < 0.16 {
+	if detail == "" || g.BestSubScore < genreDetailMinScore {
 		return ""
 	}
-	switch detail {
-	case "Rock / Black Metal", "Rock / Funeral Doom Metal", "Hip Hop / DJ Battle Tool":
-		if g.BestSubScore < 0.24 {
-			return ""
-		}
+	margin := g.BestSubScore - g.SecondSubScore
+	if g.SecondSubScore > 0 &&
+		margin < genreDetailMinMargin &&
+		g.BestSubScore < genreDetailStrongScore {
+		return ""
 	}
 	return detail
 }
@@ -1545,6 +1583,47 @@ func averageHeadPredictions(data []float32, validRows int) []float32 {
 	return out
 }
 
+func applyHeadPredictions(
+	result *EssentiaOutput,
+	name string,
+	head *essentiaHead,
+	probs []float32,
+	validRows int,
+) {
+	if result == nil || head == nil || len(probs) == 0 || validRows <= 0 {
+		return
+	}
+	if strings.Contains(name, "regression") {
+		diagnostics := aggregateRegressionHead(probs, validRows)
+		essentiaLog.I(
+			"regression head name=%s value=%.4f rawMin=%.4f rawMax=%.4f rawMean=%.4f rawStd=%.4f rows=%d outOfRange=%d saturated=%t reliable=%t",
+			name,
+			diagnostics.Value,
+			diagnostics.RawMin,
+			diagnostics.RawMax,
+			diagnostics.RawMean,
+			diagnostics.RawStd,
+			diagnostics.ValidRows,
+			diagnostics.OutOfRange,
+			diagnostics.Saturated,
+			diagnostics.Reliable,
+		)
+		switch name {
+		case "approachability_regression-discogs-effnet-1":
+			result.Approachability = diagnostics.Value
+		case "engagement_regression-discogs-effnet-1":
+			result.Engagement = diagnostics.Value
+		}
+		return
+	}
+
+	avg := averageHeadPredictions(probs, validRows)
+	if len(avg) == 0 {
+		return
+	}
+	applyHeadPrediction(result, name, head, avg)
+}
+
 func applyHeadPrediction(result *EssentiaOutput, name string, head *essentiaHead, avg []float32) {
 	if result == nil || head == nil || len(avg) == 0 {
 		return
@@ -1581,21 +1660,11 @@ func applyHeadPrediction(result *EssentiaOutput, name string, head *essentiaHead
 		// mutually exclusive classes. A weighted average suppresses every axis
 		// when several valid tags are moderately active, so combine them as a
 		// bounded probabilistic union instead.
-		result.Melodicness = weightedClassEvidence(avg, head.classes, map[string]float64{
-			"melodic": 1.00, "emotional": 0.25, "romantic": 0.20, "ballad": 0.15,
-		})
-		result.Softness = weightedClassEvidence(avg, head.classes, map[string]float64{
-			"soft": 1.00, "calm": 0.45, "relaxing": 0.45, "meditative": 0.25,
-		})
-		result.Heaviness = weightedClassEvidence(avg, head.classes, map[string]float64{
-			"heavy": 1.00, "powerful": 0.45, "epic": 0.25, "dramatic": 0.20,
-		})
-		result.Dreaminess = weightedClassEvidence(avg, head.classes, map[string]float64{
-			"dream": 1.00, "space": 0.35, "soundscape": 0.30, "deep": 0.25, "romantic": 0.15,
-		})
-		result.Emotionality = weightedClassEvidence(avg, head.classes, map[string]float64{
-			"emotional": 1.00, "melancholic": 0.40, "dramatic": 0.35, "romantic": 0.25, "sad": 0.20,
-		})
+		result.Melodicness = weightedClassEvidence(avg, head.classes, jamendoMelodicWeights)
+		result.Softness = weightedClassEvidence(avg, head.classes, jamendoSoftnessWeights)
+		result.Heaviness = weightedClassEvidence(avg, head.classes, jamendoHeavinessWeights)
+		result.Dreaminess = weightedClassEvidence(avg, head.classes, jamendoDreaminessWeights)
+		result.Emotionality = weightedClassEvidence(avg, head.classes, jamendoEmotionalityWeights)
 	}
 }
 

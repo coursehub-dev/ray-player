@@ -148,3 +148,30 @@ func clusterTestEmbedding(x, y float32) []float32 {
 	out[1] = y
 	return out
 }
+
+func TestMeasureClusterHealthReportsOnlySemanticPoints(t *testing.T) {
+	tracks := []library.Track{
+		{ClusterID: 0},
+		{ClusterID: 1},
+		{ClusterID: 0},
+	}
+	points := [][]float64{
+		{0, 0},
+		{1, 1},
+		nil,
+	}
+	centroids := [][]float64{
+		{0, 0},
+		{0.5, 0.5},
+	}
+	health := measureClusterHealth(tracks, points, centroids)
+	if health.ValidPoints != 2 {
+		t.Fatalf("valid=%d want=2", health.ValidPoints)
+	}
+	if len(health.Sizes) != 2 || health.Sizes[0] != 1 || health.Sizes[1] != 1 {
+		t.Fatalf("sizes=%v want=[1 1]", health.Sizes)
+	}
+	if health.MeanDistance <= 0 || health.MaxDistance <= 0 {
+		t.Fatalf("expected positive dispersion: %+v", health)
+	}
+}

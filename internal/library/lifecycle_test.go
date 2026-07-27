@@ -9,6 +9,14 @@ import (
 	"ray-player1/internal/db"
 )
 
+func TestPendingRealFileFeaturesContainNoSyntheticSemantics(t *testing.T) {
+	f := pendingFeatures()
+	if f.Tempo != 0 || f.Energy != 0 || f.Danceability != 0 || f.Valence != 0 ||
+		f.Acousticness != 0 || f.Instrumentalness != 0 || len(f.Embedding) != 0 {
+		t.Fatalf("pending real-file features must be unknown, got %+v", f)
+	}
+}
+
 func TestServiceCloseIsIdempotentAndStopsNewAnalysis(t *testing.T) {
 	store, err := db.OpenAtPath(filepath.Join(t.TempDir(), "library.db"))
 	if err != nil {

@@ -149,12 +149,13 @@ type GenreClassScore struct {
 }
 
 type GenreGroupScore struct {
-	Label        string  `json:"label"`
-	Score        float64 `json:"score"`
-	Support      int     `json:"support"`
-	SumScore     float64 `json:"sumScore"`
-	BestSubLabel string  `json:"bestSubLabel"`
-	BestSubScore float64 `json:"bestSubScore"`
+	Label          string  `json:"label"`
+	Score          float64 `json:"score"`
+	Support        int     `json:"support"`
+	SumScore       float64 `json:"sumScore"`
+	BestSubLabel   string  `json:"bestSubLabel"`
+	BestSubScore   float64 `json:"bestSubScore"`
+	SecondSubScore float64 `json:"secondSubScore,omitempty"`
 }
 
 type GenrePatchTop struct {
@@ -442,7 +443,7 @@ func (e *EssentiaEngine) analyzeProbe(ctx context.Context, mel []float32, patche
 	if err != nil {
 		return EssentiaProbeReport{}, err
 	}
-	res.Genre = buildGenreProbe(genreAvg, genreShape, e.genreClasses, validPatches, opts)
+	res.Genre = buildGenreProbe(genreAvg, genreData, genreShape, e.genreClasses, validPatches, opts)
 	res.Heads = make([]HeadProbeReport, 0, len(essentiaHeadNames))
 	for _, name := range essentiaHeadNames {
 		head := e.headMap[name]
@@ -506,7 +507,7 @@ func prepareProbeMel(path string, opts ProbeOptions) ([]float32, int, []int64, [
 		chunk := frames[startFrame*analysis.EssentiaMelBands : endFrame*analysis.EssentiaMelBands]
 		mel = append(mel, chunk...)
 	}
-	shape := []int64{int64(maxInt(1, patches)), int64(analysis.EssentiaMelBands), int64(analysis.EssentiaPatchFrames)}
+	shape := []int64{int64(maxInt(1, patches)), int64(analysis.EssentiaPatchFrames), int64(analysis.EssentiaMelBands)}
 	return mel, patches, shape, patchStats, nil
 }
 
@@ -559,7 +560,17 @@ func buildHeadProbe(name string, head *essentiaHead, avg []float32, probs []floa
 			firstRows = append(firstRows, row)
 		}
 	}
-	return HeadProbeReport{Name: name, InputName: head.inputName, OutputName: head.outputName, Classes: append([]string{}, head.classes...), Shape: shape, PositiveLabel: positiveLabel, PositiveIndex: positiveIdx, StatsByClass: statsByClass, PositiveStats: pos, Aggregation: AggregationReport{ChosenValue: chooseHeadValue(name, series, pos), ChosenMode: chooseHeadMode(name), Mean: pos.Mean, Median: pos.Median, Trimmed10: pos.Trimmed10, Support30: pos.Support30, Support50: pos.Support50, Support70: pos.Support70, Binaryness: pos.Binaryness}, FirstRows: firstRows, Warnings: warnings}
+	chosenValue := pos.Mean
+	chosenMode := "mean"
+	if isRegressionHead(name) {
+		diagnostics := aggregateRegressionHead(probs, rows)
+		chosenValue = diagnostics.Value
+		chosenMode = "robust_trimmed_mean"
+		if !diagnostics.Reliable {
+			chosenMode = "neutral_fallback"
+		}
+	}
+	return HeadProbeReport{Name: name, InputName: head.inputName, OutputName: head.outputName, Classes: append([]string{}, head.classes...), Shape: shape, PositiveLabel: positiveLabel, PositiveIndex: positiveIdx, StatsByClass: statsByClass, PositiveStats: pos, Aggregation: AggregationReport{ChosenValue: chosenValue, ChosenMode: chosenMode, Mean: pos.Mean, Median: pos.Median, Trimmed10: pos.Trimmed10, Support30: pos.Support30, Support50: pos.Support50, Support70: pos.Support70, Binaryness: pos.Binaryness}, FirstRows: firstRows, Warnings: warnings}
 }
 
 func positiveStats(avg []float32, idx int) Stat {
@@ -567,23 +578,6 @@ func positiveStats(avg []float32, idx int) Stat {
 		return Stat{}
 	}
 	return stat([]float64{float64(avg[idx])})
-}
-
-func chooseHeadValue(name string, series []float64, st Stat) float64 {
-	if isRegressionHead(name) {
-		return st.Mean
-	}
-	if len(series) == 0 {
-		return st.Mean
-	}
-	return st.Trimmed10
-}
-
-func chooseHeadMode(name string) string {
-	if isRegressionHead(name) {
-		return "mean"
-	}
-	return "trimmed10"
 }
 
 var positiveHeadClass = map[string]string{
@@ -805,7 +799,7 @@ func embeddingReport(xs []float32) EmbeddingReport {
 	return EmbeddingReport{Dim: len(xs), Min: float64(minV), Max: float64(maxV), Mean: float64(meanV), RMS: float64(rmsV), Norm: l2Norm(xs), Vector: vec}
 }
 
-func buildGenreProbe(avg []float32, shape []int64, classes []string, validPatches int, opts ProbeOptions) GenreProbeReport {
+func buildGenreProbe(avg, raw []float32, shape []int64, classes []string, validPatches int, opts ProbeOptions) GenreProbeReport {
 	top := topKGenres(avg, classes, 15)
 	groups := topGenreGroups(avg, classes, 10)
 	primary, detail, score, margin := choosePrimaryGenre(groups, top)
@@ -821,27 +815,59 @@ func buildGenreProbe(avg []float32, shape []int64, classes []string, validPatche
 		out.TopClasses = append(out.TopClasses, GenreClassScore{Index: c.Idx, Label: c.Label, Score: float64(c.Score)})
 	}
 	for _, g := range groups {
-		out.Groups = append(out.Groups, GenreGroupScore{Label: g.Label, Score: float64(g.Score), Support: g.Support, SumScore: float64(g.SumScore), BestSubLabel: g.BestSubLabel, BestSubScore: float64(g.BestSubScore)})
+		out.Groups = append(out.Groups, GenreGroupScore{Label: g.Label, Score: float64(g.Score), Support: g.Support, SumScore: float64(g.SumScore), BestSubLabel: g.BestSubLabel, BestSubScore: float64(g.BestSubScore), SecondSubScore: float64(g.SecondSubScore)})
 	}
-	if opts.IncludeGenrePatchDebug {
-		for p := 0; p < minInt(validPatches, 8) && p*len(classes) < len(avg); p++ {
-			row := avg
-			limit := minInt(len(row), 5)
-			topPatch := make([]GenreClassScore, 0, limit)
-			for i := 0; i < limit; i++ {
-				topPatch = append(topPatch, GenreClassScore{Index: i, Label: safeClass(classes, i), Score: float64(row[i])})
+	if opts.IncludeGenrePatchDebug && len(classes) > 0 {
+		rows := minInt(validPatches, len(raw)/len(classes))
+		rows = minInt(rows, 8)
+		for patch := 0; patch < rows; patch++ {
+			start := patch * len(classes)
+			end := start + len(classes)
+			if end > len(raw) {
+				break
 			}
-			out.PatchTop = append(out.PatchTop, GenrePatchTop{Patch: p, Top: topPatch})
+			topPatch := topKGenres(raw[start:end], classes, 5)
+			row := make([]GenreClassScore, 0, len(topPatch))
+			for _, candidate := range topPatch {
+				row = append(row, GenreClassScore{Index: candidate.Idx, Label: candidate.Label, Score: float64(candidate.Score)})
+			}
+			out.PatchTop = append(out.PatchTop, GenrePatchTop{Patch: patch, Top: row})
 		}
 	}
 	return out
 }
 
 func extractFinalFeatures(ess EssentiaProbeReport, f analysis.Features) FinalFeatureReport {
+	dance := essHeadsValue(ess.Heads, "danceability-discogs-effnet-1")
+	happy := essHeadsValue(ess.Heads, "mood_happy-discogs-effnet-1")
+	sad := essHeadsValue(ess.Heads, "mood_sad-discogs-effnet-1")
+	relaxed := essHeadsValue(ess.Heads, "mood_relaxed-discogs-effnet-1")
+	party := essHeadsValue(ess.Heads, "mood_party-discogs-effnet-1")
+	aggressive := essHeadsValue(ess.Heads, "mood_aggressive-discogs-effnet-1")
+	acoustic := essHeadsValue(ess.Heads, "mood_acoustic-discogs-effnet-1")
+	electronic := essHeadsValue(ess.Heads, "mood_electronic-discogs-effnet-1")
+	instrumental := probeBlendMetric(f.Instrumentalness, essHeadsValue(ess.Heads, "voice_instrumental-discogs-effnet-1"), 0.7)
+	brightness := essHeadsValue(ess.Heads, "timbre-discogs-effnet-1")
+	tonality := essHeadsValue(ess.Heads, "tonal_atonal-discogs-effnet-1")
+	approachability := essHeadsValue(ess.Heads, "approachability_regression-discogs-effnet-1")
+	engagement := essHeadsValue(ess.Heads, "engagement_regression-discogs-effnet-1")
+
+	melodic := essHeadWeightedEvidence(ess.Heads, "mtg_jamendo_moodtheme-discogs-effnet-1", jamendoMelodicWeights)
+	soft := essHeadWeightedEvidence(ess.Heads, "mtg_jamendo_moodtheme-discogs-effnet-1", jamendoSoftnessWeights)
+	heavy := essHeadWeightedEvidence(ess.Heads, "mtg_jamendo_moodtheme-discogs-effnet-1", jamendoHeavinessWeights)
+	dream := essHeadWeightedEvidence(ess.Heads, "mtg_jamendo_moodtheme-discogs-effnet-1", jamendoDreaminessWeights)
+	emotional := essHeadWeightedEvidence(ess.Heads, "mtg_jamendo_moodtheme-discogs-effnet-1", jamendoEmotionalityWeights)
+	melodic = clamp01(maxf(melodic, 0.15*tonality))
+	soft = clamp01(maxf(soft, 0.20*relaxed))
+	heavy = clamp01(maxf(heavy, 0.30*aggressive))
+
+	mlValence := deriveValence(happy, sad, relaxed, party, aggressive)
+	mlEnergy := deriveEnergy(dance, party, aggressive, engagement)
+
 	return FinalFeatureReport{
-		Danceability:      f.Danceability,
-		Energy:            f.Energy,
-		Valence:           f.Valence,
+		Danceability:      probeBlendMetric(f.Danceability, dance, 0.7),
+		Energy:            probeBlendMetric(f.Energy, mlEnergy, 0.65),
+		Valence:           probeBlendMetric(f.Valence, mlValence, 0.7),
 		Loudness:          f.Loudness,
 		SpectralCentroid:  f.SpectralCentroid,
 		ZeroCrossingRate:  f.ZeroCrossingRate,
@@ -854,24 +880,24 @@ func extractFinalFeatures(ess EssentiaProbeReport, f analysis.Features) FinalFea
 		LowBandRatio:      f.LowBandRatio,
 		MidBandRatio:      f.MidBandRatio,
 		HighBandRatio:     f.HighBandRatio,
-		Happy:             essHeadsValue(ess.Heads, "mood_happy-discogs-effnet-1"),
-		Sad:               essHeadsValue(ess.Heads, "mood_sad-discogs-effnet-1"),
-		Relaxed:           essHeadsValue(ess.Heads, "mood_relaxed-discogs-effnet-1"),
-		Party:             essHeadsValue(ess.Heads, "mood_party-discogs-effnet-1"),
-		Aggressive:        essHeadsValue(ess.Heads, "mood_aggressive-discogs-effnet-1"),
-		Acoustic:          essHeadsValue(ess.Heads, "mood_acoustic-discogs-effnet-1"),
-		Electronic:        essHeadsValue(ess.Heads, "mood_electronic-discogs-effnet-1"),
-		Instrumental:      essHeadsValue(ess.Heads, "voice_instrumental-discogs-effnet-1"),
-		Vocal:             1 - essHeadsValue(ess.Heads, "voice_instrumental-discogs-effnet-1"),
-		Melodic:           essHeadsValue(ess.Heads, "mtg_jamendo_moodtheme-discogs-effnet-1"),
-		Soft:              0,
-		Heavy:             0,
-		Dream:             0,
-		Emotional:         0,
-		Brightness:        essHeadsValue(ess.Heads, "timbre-discogs-effnet-1"),
-		Tonality:          essHeadsValue(ess.Heads, "tonal_atonal-discogs-effnet-1"),
-		Approachability:   essHeadsValue(ess.Heads, "approachability_regression-discogs-effnet-1"),
-		Engagement:        essHeadsValue(ess.Heads, "engagement_regression-discogs-effnet-1"),
+		Happy:             happy,
+		Sad:               sad,
+		Relaxed:           relaxed,
+		Party:             party,
+		Aggressive:        aggressive,
+		Acoustic:          probeBlendMetric(f.Acousticness, acoustic, 0.7),
+		Electronic:        electronic,
+		Instrumental:      instrumental,
+		Vocal:             clamp01(1 - instrumental),
+		Melodic:           melodic,
+		Soft:              soft,
+		Heavy:             heavy,
+		Dream:             dream,
+		Emotional:         emotional,
+		Brightness:        brightness,
+		Tonality:          tonality,
+		Approachability:   approachability,
+		Engagement:        engagement,
 	}
 }
 
@@ -883,6 +909,33 @@ func essHeadsValue(heads []HeadProbeReport, name string) float64 {
 	}
 	return 0
 }
+
+func essHeadWeightedEvidence(heads []HeadProbeReport, name string, weights map[string]float64) float64 {
+	remaining := 1.0
+	for _, h := range heads {
+		if h.Name != name {
+			continue
+		}
+		for className, weight := range weights {
+			st, ok := h.StatsByClass[className]
+			if !ok {
+				continue
+			}
+			evidence := clamp01(st.Mean * clamp01(weight))
+			remaining *= 1 - evidence
+		}
+		break
+	}
+	return clamp01(1 - remaining)
+}
+
+func probeBlendMetric(base, ml, mlWeight float64) float64 {
+	if ml <= 0 {
+		return base
+	}
+	return base*(1-mlWeight) + ml*mlWeight
+}
+
 func cleanName(s string) string { return strings.TrimSpace(s) }
 func maxInt(a, b int) int {
 	if a > b {

@@ -15,3 +15,5 @@ assets/runtime/
 assets/assets/models/essentia/
 assets/assets/models/minilm/
 assets/assets/onnxruntime-win-x64-1.26.0/
+
+.qoder

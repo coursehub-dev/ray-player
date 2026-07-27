@@ -67,7 +67,9 @@ func extractTempoFrames(samples []float64) [][]float32 {
 		hannWin:    buildHannWindow(TempoFFTSize),
 		melFilters: buildTempoCNNMelFilterbank(),
 	}
-	return processor.ProcessEnergy(samples)
+	// Essentia TensorflowInputTempoCNN hardcodes MelBands type=magnitude.
+	// Do not reuse the EffNet/MusiCNN power-spectrum frontend here.
+	return processor.ProcessMagnitude(samples)
 }
 
 func buildTempoCNNMelFilterbank() [][]float64 {
@@ -118,26 +120,44 @@ func buildTempoCNNMelFilterbank() [][]float64 {
 }
 
 func standardizeTempoPatches(patches [][]float32) {
+	if len(patches) == 0 {
+		return
+	}
+	width := len(patches[0])
+	if width == 0 {
+		return
+	}
 	for _, patch := range patches {
-		if len(patch) == 0 {
-			continue
+		if len(patch) != width {
+			return
 		}
+	}
+
+	// Essentia TensorflowPredictTempoCNN first builds [B,1,256,40] and then
+	// applies TensorNormalize(scaler="standard") with the algorithm's
+	// default axis=0. Therefore each time/mel coordinate is standardized over
+	// the patch batch, not over the values inside one patch.
+	for i := 0; i < width; i++ {
 		mean := 0.0
-		for _, value := range patch {
-			mean += float64(value)
+		for _, patch := range patches {
+			mean += float64(patch[i])
 		}
-		mean /= float64(len(patch))
+		mean /= float64(len(patches))
+
 		variance := 0.0
-		for _, value := range patch {
-			delta := float64(value) - mean
+		for _, patch := range patches {
+			delta := float64(patch[i]) - mean
 			variance += delta * delta
 		}
-		std := math.Sqrt(variance / float64(len(patch)))
+		std := math.Sqrt(variance / float64(len(patches)))
 		if std <= 1e-12 {
-			std = 1
+			for _, patch := range patches {
+				patch[i] = 0
+			}
+			continue
 		}
-		for i, value := range patch {
-			patch[i] = float32((float64(value) - mean) / std)
+		for _, patch := range patches {
+			patch[i] = float32((float64(patch[i]) - mean) / std)
 		}
 	}
 }
