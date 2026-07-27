@@ -24,6 +24,16 @@ import PodcastProgressBar from "./components/PodcastProgressBar.svelte";
 import AddLinkModal from "./components/AddLinkModal.svelte";
 import DoctorModal from "./components/DoctorModal.svelte";
 import { PlayerBar } from "./widgets/player-bar";
+import { getTrackPlaybackUI } from "./entities/playback";
+import {
+	applyPlaybackPatch,
+	nextTrack as playbackNextTrack,
+	previousTrack as playbackPreviousTrack,
+	seekTo,
+	setVolumeLevel,
+	toggleMute as playbackToggleMute,
+	togglePause as playbackTogglePause,
+} from "./features/playback";
 import { api } from "./lib/api";
 import { isPodcastItemId } from "./lib/mediaIdentity";
 import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./lib/playerUi";
@@ -88,18 +98,6 @@ let appState = {
 		currentIndex: -1,
 	},
 	libraryStat: { tracks: 0 },
-};
-let playback = {
-	status: "stopped",
-	currentTrackId: "",
-	positionMs: 0,
-	durationMs: 0,
-	queueId: "",
-	queueIndex: -1,
-	queueLength: 0,
-	rayId: "",
-	raySeedTrackId: "",
-	lastError: "",
 };
 
 let libraryMode = "music";
@@ -238,9 +236,6 @@ const unsubscribeState = state.subscribe((v) => {
 	// к нужной позиции при unmute, а не показывал 0.
 	const rawVol = v.current?.volume || 0.58;
 	volumeValue = rawVol > 0 ? rawVol : v.current?.lastNonZeroVolume || 0.58;
-});
-const unsubscribePlayback = playbackState.subscribe((value) => {
-	playback = value;
 });
 const unsubscribeRayBuild = rayBuildState.subscribe((value) => {
 	rayBuild = value;
@@ -486,7 +481,7 @@ const playPodcast = async (itemId, fromRay = false) => {
 		return;
 	}
 
-	if (itemId === playback.currentTrackId) {
+	if (itemId === $playbackState.currentTrackId) {
 		await togglePause();
 		return;
 	}
@@ -498,7 +493,7 @@ const playPodcast = async (itemId, fromRay = false) => {
 };
 
 const togglePodcastRow = async (itemId, fromRay = false) => {
-	if (itemId === playback.currentTrackId) {
+	if (itemId === $playbackState.currentTrackId) {
 		await togglePause();
 		return;
 	}
@@ -625,7 +620,7 @@ const playNext = async () => {
 		await syncPayload(api.nextPodcast());
 		return;
 	}
-	await nextTrack();
+	await playbackNextTrack();
 };
 
 const playPrevious = async () => {
@@ -633,7 +628,7 @@ const playPrevious = async () => {
 		await syncPayload(api.previousPodcast());
 		return;
 	}
-	await previousTrack();
+	await playbackPreviousTrack();
 };
 
 onMount(async () => {
@@ -646,7 +641,6 @@ onMount(async () => {
 	results = $searchResults || [];
 	return () => {
 		unsubscribeState();
-		unsubscribePlayback();
 		unsubscribeRayBuild();
 		unsubscribeScreen();
 		unsubscribeQuery();
@@ -706,21 +700,13 @@ const handleKeydown = async (event) => {
 		event.preventDefault();
 		const duration = appState.current?.durationMs || 0;
 		const next = Math.min((appState.current?.positionMs || 0) + 5000, duration);
-		const statePatch = await api.seek(next);
-		state.update((prev) => ({
-			...prev,
-			current: { ...prev.current, ...statePatch },
-		}));
+		await seekTo(next, { stableDurationMs });
 		return;
 	}
 	if (event.key === "ArrowLeft") {
 		event.preventDefault();
 		const next = Math.max((appState.current?.positionMs || 0) - 5000, 0);
-		const statePatch = await api.seek(next);
-		state.update((prev) => ({
-			...prev,
-			current: { ...prev.current, ...statePatch },
-		}));
+		await seekTo(next, { stableDurationMs });
 	}
 };
 
@@ -761,16 +747,7 @@ const playTrackFromMenu = async () => {
 };
 
 const togglePause = async () => {
-	if (playback.status === "loading") {
-		return;
-	}
-
-	const next = await api.togglePlay();
-	playbackState.set(next);
-	state.update((prev) => ({
-		...prev,
-		current: { ...prev.current, ...next },
-	}));
+	await playbackTogglePause();
 };
 
 const playOrToggle = async (trackId, targetScreen = null) => {
@@ -779,7 +756,7 @@ const playOrToggle = async (trackId, targetScreen = null) => {
 		return;
 	}
 
-	if (trackId === playback.currentTrackId) {
+	if (trackId === $playbackState.currentTrackId) {
 		await togglePause();
 		return;
 	}
@@ -800,7 +777,7 @@ const playOrToggle = async (trackId, targetScreen = null) => {
 		if (payload?.library) {
 			state.set(payload);
 			if (payload.current?.status) {
-				playbackState.set(payload.current);
+				applyPlaybackPatch(payload.current);
 			}
 			syncEmoFlowFromPayload(payload);
 		}
@@ -828,7 +805,7 @@ const refreshAudit = async (trackId = appState.current?.currentTrackId) => {
 };
 
 const playTrackFromQueue = async (trackId) => {
-	if (trackId === playback.currentTrackId) {
+	if (trackId === $playbackState.currentTrackId) {
 		await togglePause();
 		return;
 	}
@@ -839,8 +816,6 @@ const resumeRay = async (rayId) => {
 	await syncPayload(api.resumeRay(rayId));
 	setScreen("ray");
 };
-const nextTrack = async () => syncPayload(api.nextTrack());
-const previousTrack = async () => syncPayload(api.previousTrack());
 const addFolder = async () => {
 	await syncPayload(libraryMode === "podcast" ? api.addPodcastFolder() : api.addFolder());
 	if (libraryMode === "podcast") {
@@ -860,19 +835,11 @@ const changeSeek = async (event) => {
 	const pct = Number(event.currentTarget.value);
 	const duration = appState.current?.durationMs || 0;
 	const target = Math.round((duration * pct) / 100);
-	const next = await api.seek(target);
-	state.update((prev) => ({
-		...prev,
-		current: { ...prev.current, ...next },
-	}));
+	await seekTo(target, { stableDurationMs });
 };
 const changeVolume = async (event) => {
 	const value = Number(event.currentTarget.value) / 100;
-	const next = await api.setVolume(value);
-	state.update((prev) => ({
-		...prev,
-		current: { ...prev.current, ...next },
-	}));
+	await setVolumeLevel(value);
 };
 
 const openSettings = async () => {
@@ -1004,15 +971,7 @@ const commitSeek = async (nextRatio) => {
 	seekInFlight = true;
 	seekValue = Math.round(ratio * 100);
 	try {
-		const next = await api.seek(target);
-		state.update((prev) => ({
-			...prev,
-			current: {
-				...prev.current,
-				...next,
-				durationMs: next?.durationMs || prev.current?.durationMs || stableDurationMs,
-			},
-		}));
+		await seekTo(target, { stableDurationMs });
 	} finally {
 		seekInFlight = false;
 	}
@@ -1035,13 +994,7 @@ const setPlayerVolume = (value) => {
 		pendingVolume = null;
 
 		try {
-			const newState = await api.setVolume(next);
-			if (newState) {
-				state.update((prev) => ({
-					...prev,
-					current: { ...prev.current, ...newState },
-				}));
-			}
+			await setVolumeLevel(next);
 		} finally {
 			volumePreview = null;
 		}
@@ -1052,13 +1005,7 @@ const togglePlayerMute = async () => {
 	if (volumeMuteBusy) return;
 	volumeMuteBusy = true;
 	try {
-		const newState = await api.toggleMute();
-		if (newState) {
-			state.update((prev) => ({
-				...prev,
-				current: { ...prev.current, ...newState },
-			}));
-		}
+		await playbackToggleMute();
 	} finally {
 		volumePreview = null;
 		volumeMuteBusy = false;
@@ -1074,13 +1021,7 @@ const previewVolume = async (nextValue) => {
 const commitVolume = async (nextValue) => {
 	const value = Math.max(0, Math.min(1, Number(nextValue) || 0));
 	volumePreview = value;
-	const newState = await api.setVolume(value);
-	if (newState) {
-		state.update((prev) => ({
-			...prev,
-			current: { ...prev.current, ...newState },
-		}));
-	}
+	await setVolumeLevel(value);
 	volumePreview = null;
 };
 
@@ -1255,13 +1196,7 @@ const findTrackById = (trackId) => {
 	if (!trackId) return null;
 	return trackById(trackId) || null;
 };
-const getTrackUIState = (trackId) => ({
-	isPlayingTrack: trackId === playback.currentTrackId,
-	isRaySeed: trackId === playback.raySeedTrackId && Boolean(playback.rayId),
-	isActuallyPlaying: trackId === playback.currentTrackId && playback.status === "playing",
-	isPausedCurrent: trackId === playback.currentTrackId && playback.status === "paused",
-	isLoadingCurrent: trackId === playback.currentTrackId && playback.status === "loading",
-});
+const getTrackUIState = (trackId) => getTrackPlaybackUI($playbackState, trackId);
 const rowIcon = (trackId) => (getTrackUIState(trackId).isActuallyPlaying ? "Ⅱ" : "▶");
 const rowCurrent = (trackId) => getTrackUIState(trackId).isPlayingTrack;
 const rowRaySeed = (trackId) => getTrackUIState(trackId).isRaySeed;
@@ -1273,15 +1208,15 @@ $: isRayBuilding = rayBuild.status === "building";
 const toggleInsight = async () => {
 	showInsight = !showInsight;
 
-	if (showInsight && playback.currentTrackId && rayBuild.status !== "building") {
-		await refreshAudit(playback.currentTrackId);
+	if (showInsight && $playbackState.currentTrackId && rayBuild.status !== "building") {
+		await refreshAudit($playbackState.currentTrackId);
 	} else if (!showInsight) {
 		auditRows = [];
 	}
 };
 
-const isCurrentTrackPlaying = () => playback.status === "playing" && Boolean(playback.currentTrackId);
-const rayPlaying = () => Boolean(playback.status === "playing" && playback.currentTrackId);
+const isCurrentTrackPlaying = () => $playbackState.status === "playing" && Boolean($playbackState.currentTrackId);
+const rayPlaying = () => Boolean($playbackState.status === "playing" && $playbackState.currentTrackId);
 
 const emotionLabels = {
 	happy: "happy",
@@ -1489,16 +1424,16 @@ $: emoFlowEmotionLabel = currentEmotionLabel($emoFlowState) || "neutral";
 $: playerEmoFlowReason = String(
 	$emoFlowState?.transition?.reason || $emoFlowState?.reason || $emoFlowState?.current?.reason || "",
 ).trim();
-$: hasActiveMusic = Boolean(playback.currentTrackId) && !playingPodcast;
+$: hasActiveMusic = Boolean($playbackState.currentTrackId) && !playingPodcast;
 $: appShellStyle =
 	visualMode === "podcast"
 		? podcastAccentStyle
 		: hasActiveMusic
 			? buildCssVars($cssVariables)
 			: defaultMusicAccentStyle;
-$: currentTrackMeta = trackById(playback.currentTrackId);
-$: currentQueueItem = (appState.queue || []).find((item) => item.trackId === playback.currentTrackId);
-$: currentQueueIndex = (appState.queue || []).findIndex((item) => item.trackId === playback.currentTrackId);
+$: currentTrackMeta = trackById($playbackState.currentTrackId);
+$: currentQueueItem = (appState.queue || []).find((item) => item.trackId === $playbackState.currentTrackId);
+$: currentQueueIndex = (appState.queue || []).findIndex((item) => item.trackId === $playbackState.currentTrackId);
 $: libraryEmpty =
 	libraryMode === "podcast" ? (appState.podcasts || []).length === 0 : (appState.libraryStat?.tracks || 0) === 0;
 $: visibleResults = results;
@@ -1508,27 +1443,27 @@ $: if (libraryMode === "podcast" && query.trim() === "") {
 	podcastResults = [...(appState.podcasts || [])];
 }
 
-$: playingPodcast = isPodcastItemId(playback.currentTrackId);
+$: playingPodcast = isPodcastItemId($playbackState.currentTrackId);
 
 $: visualMode = resolveVisualMode(libraryMode);
 
 $: currentPodcast = playingPodcast
-	? (appState.podcasts || []).find((item) => item.id === playback.currentTrackId) || null
+	? (appState.podcasts || []).find((item) => item.id === $playbackState.currentTrackId) || null
 	: null;
 
-$: playbackSelection = hasPlaybackSelection(playback, currentPodcast);
+$: playbackSelection = hasPlaybackSelection($playbackState, currentPodcast);
 
 $: playerTitle = resolvePlayerTitle({
 	libraryMode,
-	playback,
+	playback: $playbackState,
 	currentPodcast,
 });
 
-$: playerArtist = currentPodcast?.author || currentPodcast?.series || playback.currentArtist || "";
+$: playerArtist = currentPodcast?.author || currentPodcast?.series || $playbackState.currentArtist || "";
 
 $: playerSubline = playingPodcast
 	? [currentPodcast?.series, "Подкаст"].filter(Boolean).join(" · ")
-	: playback.currentSub || "";
+	: $playbackState.currentSub || "";
 </script>
 
 <svelte:window on:keydown={handleKeydown} on:click={closeTrackMenu} on:dragenter={onDragEnter} on:dragover={onDragOver} on:dragleave={onDragLeave} on:drop={onDrop} />
@@ -1705,7 +1640,7 @@ $: playerSubline = playingPodcast
                                 <button
                                     type="button"
                                     class:completed={item.isCompleted}
-                                    class:current={item.id === playback.currentTrackId}
+                                    class:current={item.id === $playbackState.currentTrackId}
                                     class:external-pending={!externalPlayable(item)}
                                     disabled={!externalPlayable(item)}
                                     class="row action-row podcast-row"
@@ -1713,7 +1648,7 @@ $: playerSubline = playingPodcast
                                         togglePodcastRow(item.id, false)}
                                 >
                                     <div class="podcast-icon">
-                                        {#if item.id === playback.currentTrackId && playback.status === "playing"}
+                                        {#if item.id === $playbackState.currentTrackId && $playbackState.status === "playing"}
                                             <Pause size={20} strokeWidth={1.8} />
                                         {:else}
                                             <Play size={20} strokeWidth={1.8} />
@@ -1886,8 +1821,8 @@ $: playerSubline = playingPodcast
                         <div class="list podcast-history-list">
                             {#if (appState.podcastHistory || []).length}
                                 {#each appState.podcastHistory as entry}
-                                    <button type="button" class="row action-row podcast-history-row" class:current={entry.item.id === playback.currentTrackId} on:click={() => playPodcastHistoryItem(entry)}>
-                                        <div class="podcast-history-icon">{#if entry.item.id === playback.currentTrackId && playback.status === "playing"}<Pause size={19} strokeWidth={1.8} />{:else}<Play size={19} strokeWidth={1.8} />{/if}</div>
+                                    <button type="button" class="row action-row podcast-history-row" class:current={entry.item.id === $playbackState.currentTrackId} on:click={() => playPodcastHistoryItem(entry)}>
+                                        <div class="podcast-history-icon">{#if entry.item.id === $playbackState.currentTrackId && $playbackState.status === "playing"}<Pause size={19} strokeWidth={1.8} />{:else}<Play size={19} strokeWidth={1.8} />{/if}</div>
                                         <div class="meta">
                                             <strong>{entry.item.title}</strong>
                                             <span>{podcastMeta(entry.item) || "Локальный выпуск"}</span>
@@ -2089,7 +2024,7 @@ $: playerSubline = playingPodcast
                                 <button
                                     type="button"
                                     class="podcast-ray-row"
-                                    class:current={rayItem.item.id === playback.currentTrackId}
+                                    class:current={rayItem.item.id === $playbackState.currentTrackId}
                                     class:drop-target={podcastRayDropIndex === rayItem.position && draggedPodcastRayIndex !== rayItem.position}
                                     on:dragover={(event) =>
                                         overPodcastRayItem(
@@ -2136,7 +2071,7 @@ $: playerSubline = playingPodcast
                                     </span>
 
                                     <span class="podcast-ray-play">
-                                        {#if rayItem.item.id === playback.currentTrackId && playback.status === "playing"}
+                                        {#if rayItem.item.id === $playbackState.currentTrackId && $playbackState.status === "playing"}
                                             <Pause size={16} strokeWidth={2} />
                                         {:else}
                                             <Play size={16} strokeWidth={2} />
@@ -2294,7 +2229,7 @@ $: playerSubline = playingPodcast
                             <RayBuildSkeleton
                                 seedTitle={trackById(
                                     rayBuild.seedTrackId,
-                                )?.title || playback.currentTitle}
+                                )?.title || $playbackState.currentTitle}
                             />
                         {:else if appState.queue?.length}
                             {#each appState.queue as item, index}
@@ -2307,7 +2242,7 @@ $: playerSubline = playingPodcast
                                     <RayTrackRow
                                         {item}
                                         {index}
-                                        {playback}
+                                        playback={$playbackState}
                                         {showInsight}
                                         dropTarget={musicRayDropIndex === index &&
                                             draggedMusicRayIndex !== index}
@@ -2458,9 +2393,9 @@ $: playerSubline = playingPodcast
         {currentTrackMeta}
         {playerArtist}
         {playerSubline}
-        playbackStatus={playback.status}
-        playbackLastError={playback.lastError}
-        playbackCurrentGenre={playback.currentGenre || ""}
+        playbackStatus={$playbackState.status}
+        playbackLastError={$playbackState.lastError}
+        playbackCurrentGenre={$playbackState.currentGenre || ""}
         {playerEmoFlowReason}
         repeatRay={settingsPayload.repeatRay}
         {playbackSelection}

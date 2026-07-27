@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { emoFlowState, syncEmoFlowFromPayload } from "./emoflow";
 import { isPodcastItemId } from "../lib/mediaIdentity";
 import { bindExternalDownloadEvents, unbindExternalDownloadEvents } from "./externalDownloads";
+import { playbackState, syncPlayback } from "../entities/playback";
 
 export const screen = writable("search");
 export const state = writable({
@@ -27,21 +28,7 @@ export const state = writable({
 	queue: [],
 	libraryStat: { tracks: 0 },
 });
-export const playbackState = writable({
-	status: "stopped",
-	currentTrackId: "",
-	currentPath: "",
-	positionMs: 0,
-	durationMs: 0,
-	queueId: "",
-	queueIndex: -1,
-	queueLength: 0,
-	rayId: "",
-	raySeedTrackId: "",
-	updatedAt: 0,
-	lastError: "",
-});
-
+export { playbackState };
 export const rayBuildState = writable({
 	status: "idle",
 	seedTrackId: "",
@@ -83,13 +70,6 @@ function showToast(payload) {
 	toast.set(payload);
 	if (timer) clearTimeout(timer);
 	timer = setTimeout(() => toast.set(null), payload?.duration || 3200);
-}
-
-function syncPlayback(payload) {
-	const playback = payload?.current || payload;
-	if (playback?.status) {
-		playbackState.set(playback);
-	}
 }
 
 function syncRayBuild(payload) {
@@ -163,7 +143,7 @@ export function bindSnapshotEvents() {
 	EventsOn("playback:update", (payload) => {
 		if (!payload?.status) return;
 
-		const current = playbackState.get?.() || {};
+		const current = get(playbackState);
 		const currentID = String(current.currentTrackId || "");
 		const incomingID = String(payload.currentTrackId || "");
 
