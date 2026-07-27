@@ -1,7 +1,7 @@
 import { get } from "svelte/store";
 import { api } from "../../shared/api";
 import { playbackState, type PlaybackState } from "../../entities/playback";
-import { state, syncPayload } from "../../stores/app";
+import { state, syncPayload } from "../../app";
 
 type PlaybackPatch = Partial<PlaybackState> & Record<string, unknown>;
 

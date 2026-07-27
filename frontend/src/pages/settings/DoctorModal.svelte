@@ -2,7 +2,7 @@
 import { createEventDispatcher, onMount } from "svelte";
 import { CheckCircle2, CircleAlert, LoaderCircle, Stethoscope, Wrench, X } from "@lucide/svelte";
 import { api } from "../../shared/api";
-import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "../../lib/doctorUi";
+import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "./doctorUi";
 
 export let settings: Record<string, any> = {};
 

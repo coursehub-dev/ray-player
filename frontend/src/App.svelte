@@ -3,8 +3,6 @@ import { onMount, tick } from "svelte";
 import {
 	screen,
 	state,
-	playbackState,
-	rayBuildState,
 	searchQuery,
 	searchResults,
 	reindexStatus,
@@ -14,17 +12,22 @@ import {
 	runSearch,
 	syncPayload,
 	unbindSnapshotEvents,
-} from "./stores/app";
-import { cssVariables, emoFlowState } from "./stores/emoflow";
+} from "./app";
+import { rayBuildState } from "./entities/ray";
+import { cssVariables, emoFlowState } from "./entities/emoflow";
 import { UISlider, SettingsSwitch } from "./shared/ui";
-import { AddLinkModal } from "./features/external-link";
+import {
+	AddLinkModal,
+	externalDownloads,
+	mergedDownloadState,
+	putExternalDownload,
+} from "./features/external-link";
 import { DoctorModal } from "./pages/settings";
 import { PlayerBar } from "./widgets/player-bar";
 import { SearchPage } from "./pages/search";
 import { HistoryPage } from "./pages/history";
 import { RayPage } from "./pages/ray";
 import { RaysPage } from "./pages/rays";
-import { getTrackPlaybackUI } from "./entities/playback";
 import {
 	podcastHistorySourceLabel,
 	podcastMeta,
@@ -65,8 +68,13 @@ import {
 } from "./features/playback";
 import { api } from "./shared/api";
 import { isPodcastItemId } from "./entities/podcast";
-import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./lib/playerUi";
-import { externalDownloads, putExternalDownload, mergedDownloadState } from "./stores/externalDownloads";
+import {
+	getTrackPlaybackUI,
+	hasPlaybackSelection,
+	playbackState,
+	resolvePlayerTitle,
+	resolveVisualMode,
+} from "./entities/playback";
 import {
 	Search,
 	History,

@@ -46,6 +46,6 @@ test("playback selection is false until real media is selected", () => {
 });
 
 test("podcast mode never paints generic accent-reactive containers", () => {
-	const css = fs.readFileSync(new URL("../style.css", import.meta.url), "utf8");
+	const css = fs.readFileSync(new URL("../../style.css", import.meta.url), "utf8");
 	assert.doesNotMatch(css, /\.mode-podcast\s+\.accent-reactive\s*\{/);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { interpolateTrackPalette, mergeEmoFlowState } from "./emoflow.ts";
+import { interpolateTrackPalette, mergeEmoFlowState } from "./store.ts";
 
 type Palette = {
 	accent: string;

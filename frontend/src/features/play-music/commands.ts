@@ -1,7 +1,7 @@
 import { api } from "../../shared/api";
 import { applyPlaybackPatch } from "../playback";
-import { state, syncPayload, toast } from "../../stores/app";
-import { syncEmoFlowFromPayload } from "../../stores/emoflow";
+import { state, syncPayload, toast } from "../../app";
+import { syncEmoFlowFromPayload } from "../../entities/emoflow";
 
 /** Request play+ray build from backend (does not touch stores). */
 export async function playTrackBuildingRay(trackId: string, mode: string) {

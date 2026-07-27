@@ -52,8 +52,8 @@ import {
 	DebugReindexLibrary,
 	TestFFmpeg,
 } from "../../../wailsjs/go/main/App";
-import { bootstrapFallback } from "../../lib/mockWails";
 import { initialPlaybackState } from "../../entities/playback/model";
+import { bootstrapFallback } from "./mockWails";
 
 type WailsApp = Record<string, ((...args: unknown[]) => unknown) | undefined>;
 

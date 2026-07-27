@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
+import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 
 export type ExternalDownloadJob = {
 	itemId: string;

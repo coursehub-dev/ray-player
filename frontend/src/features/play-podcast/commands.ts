@@ -1,5 +1,5 @@
 import { api } from "../../shared/api";
-import { syncPayload } from "../../stores/app";
+import { syncPayload } from "../../app";
 
 export async function playPodcastItem(itemId: string, fromRay = false) {
 	const payload = fromRay ? await api.playPodcastRayItem(itemId) : await api.playPodcast(itemId);
