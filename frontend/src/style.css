@@ -40,7 +40,6 @@
 	--radius-xl: 24px;
 	--radius-lg: 18px;
 	--radius-md: 14px;
-	--player-h: 96px;
 	--sidebar-w: 220px;
 	font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -84,8 +83,11 @@ button {
 .app {
 	height: 100vh;
 	display: grid;
-	grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-	grid-template-rows: 1fr var(--player-h);
+	grid-template-columns: max-content minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr) auto;
+	grid-template-areas:
+		"sidebar main"
+		"player player";
 	background:
 		radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--accent-glow) 90%, transparent), transparent 38%),
 		linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 92%, black), #000);
@@ -105,10 +107,12 @@ button {
 }
 
 .sidebar {
-	grid-row: 1 / 2;
+	grid-area: sidebar;
+	min-width: var(--sidebar-w);
+	width: max-content;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 18px;
 	padding: 18px;
 	border-right: 1px solid var(--line);
 	background: color-mix(in srgb, #030303 88%, var(--panel-tint));
@@ -117,6 +121,14 @@ button {
 		border-color 800ms ease,
 		box-shadow 800ms ease;
 	isolation: isolate;
+}
+
+.sidebar > * {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+	flex: 1;
+	min-height: 0;
 }
 
 .sidebar .nav {
@@ -360,12 +372,23 @@ button {
 }
 
 .content {
-	grid-column: 2;
-	grid-row: 1;
+	grid-area: main;
 	min-width: 0;
 	min-height: 0;
 	padding: 18px 18px 12px;
 	background: #000;
+	display: grid;
+}
+
+.content > * {
+	min-width: 0;
+	min-height: 0;
+	height: 100%;
+}
+
+.app-layout-player {
+	grid-area: player;
+	min-width: 0;
 }
 
 .screen {
@@ -2144,14 +2167,12 @@ button {
 }
 
 .player {
-	grid-column: 1 / -1;
-	grid-row: 2;
 	display: grid;
 	align-items: center;
 	border-top: 1px solid var(--line);
 	background: rgba(5, 5, 5, 0.98);
 	backdrop-filter: blur(16px);
-	padding: 0 18px;
+	padding: 12px 18px;
 }
 
 .player-inner {
@@ -2950,24 +2971,22 @@ button {
 		height: auto;
 		min-height: 100vh;
 		grid-template-columns: 1fr;
-		grid-template-rows: auto 1fr auto;
+		grid-template-rows: auto minmax(0, 1fr) auto;
+		grid-template-areas:
+			"sidebar"
+			"main"
+			"player";
 	}
 	.sidebar {
-		grid-row: 1;
-		grid-column: 1;
+		width: auto;
+		min-width: 0;
 		border-right: 0;
 		border-bottom: 1px solid var(--line);
 	}
 	.nav {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
-	.content {
-		grid-column: 1;
-		grid-row: 2;
-	}
 	.player {
-		grid-column: 1;
-		grid-row: 3;
 		position: sticky;
 		bottom: 0;
 	}

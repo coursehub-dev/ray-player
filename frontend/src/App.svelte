@@ -23,6 +23,7 @@ import {
 	putExternalDownload,
 } from "./features/external-link";
 import { DoctorModal } from "./pages/settings";
+import { AppLayout } from "./widgets/app-layout";
 import { PlayerBar } from "./widgets/player-bar";
 import { SearchPage } from "./pages/search";
 import { HistoryPage } from "./pages/history";
@@ -1403,244 +1404,241 @@ $: playerSubline = playingPodcast
 
 <svelte:window on:keydown={handleKeydown} on:click={closeTrackMenu} on:dragenter={onDragEnter} on:dragover={onDragOver} on:dragleave={onDragLeave} on:drop={onDrop} />
 
-<div
-    class:indexing={$indexingState.isIndexing}
-    class:mode-music={visualMode === "music"}
-    class:mode-podcast={visualMode === "podcast"}
-    class="app app-shell"
-    style={appShellStyle}
+<AppLayout
+	indexing={$indexingState.isIndexing}
+	{visualMode}
+	shellStyle={appShellStyle}
 >
-    <aside class="sidebar">
-        <div class="brand">
-            <strong>Local Ray Player</strong>
-            <span>локальный умный аудиоплеер</span>
-        </div>
+	<div slot="sidebar">
+		<div class="brand">
+			<strong>Local Ray Player</strong>
+			<span>локальный умный аудиоплеер</span>
+		</div>
 
-        <nav class="nav">
-            <div class="nav-section nav-top">
-                <button
-                    class:active={currentScreen === "ray"}
-                    class="nav-btn nav-ray-btn"
-                    data-playing={rayPlaying() ? "1" : "0"}
-                    on:click={() => setScreen("ray")}
-                >
-                    <span class="nav-icon nav-eq" aria-hidden="true">
-                        <i></i><i></i><i></i>
-                    </span>
-                    <span>Луч</span>
-                </button>
+		<nav class="nav">
+			<div class="nav-section nav-top">
+				<button
+					class:active={currentScreen === "ray"}
+					class="nav-btn nav-ray-btn"
+					data-playing={rayPlaying() ? "1" : "0"}
+					on:click={() => setScreen("ray")}
+				>
+					<span class="nav-icon nav-eq" aria-hidden="true">
+						<i></i><i></i><i></i>
+					</span>
+					<span>Луч</span>
+				</button>
 
-                <button
-                    type="button"
-                    class="sidebar-mode-watermark"
-                    class:busy={modeSwitchBusy}
-                    aria-label={libraryMode === "podcast"
-                        ? "Переключиться в режим музыки"
-                        : "Переключиться в режим подкастов"}
-                    title={libraryMode === "podcast"
-                        ? "Режим подкастов. Нажмите для музыки"
-                        : "Режим музыки. Нажмите для подкастов"}
-                    on:click={toggleLibraryMode}
-                >
-                    {#if visualMode === "podcast"}
-                        <Mic strokeWidth={1} aria-hidden="true" />
-                    {:else}
-                        <Music2 strokeWidth={1} aria-hidden="true" />
-                    {/if}
-                    <span>
-                        {libraryMode === "podcast"
-                            ? "Подкасты"
-                            : "Музыка"}
-                    </span>
-                </button>
+				<button
+					type="button"
+					class="sidebar-mode-watermark"
+					class:busy={modeSwitchBusy}
+					aria-label={libraryMode === "podcast"
+						? "Переключиться в режим музыки"
+						: "Переключиться в режим подкастов"}
+					title={libraryMode === "podcast"
+						? "Режим подкастов. Нажмите для музыки"
+						: "Режим музыки. Нажмите для подкастов"}
+					on:click={toggleLibraryMode}
+				>
+					{#if visualMode === "podcast"}
+						<Mic strokeWidth={1} aria-hidden="true" />
+					{:else}
+						<Music2 strokeWidth={1} aria-hidden="true" />
+					{/if}
+					<span>
+						{libraryMode === "podcast" ? "Подкасты" : "Музыка"}
+					</span>
+				</button>
+			</div>
 
-            </div>
+			<div class="nav-divider"></div>
+			<div class="nav-section nav-bottom">
+				<button
+					class:active={currentScreen === "search"}
+					class="nav-btn"
+					on:click={() => setScreen("search")}
+					><span class="nav-icon"><Search size={16} strokeWidth={1.8} /></span><span>Поиск</span></button
+				>
+				<button
+					class:active={currentScreen === "history"}
+					class="nav-btn"
+					on:click={() => setScreen("history")}
+					><span class="nav-icon"><History size={16} strokeWidth={1.8} /></span><span>История</span><small class="nav-count">{libraryMode === "podcast" ? (appState.podcastHistory || []).length : (appState.history || []).length}</small></button
+				>
+				<button
+					class:active={currentScreen === "rays"}
+					class="nav-btn"
+					on:click={() => setScreen("rays")}
+					><span class="nav-icon"><ListMusic size={16} strokeWidth={1.8} /></span><span>История лучей</span><small class="nav-count">{libraryMode === "podcast" ? (appState.podcastRays || []).length : (appState.rays || []).length}</small></button
+				>
+			</div>
+		</nav>
 
-            <div class="nav-divider"></div>
-            <div class="nav-section nav-bottom">
-                <button
-                    class:active={currentScreen === "search"}
-                    class="nav-btn"
-                    on:click={() => setScreen("search")}
-                    ><span class="nav-icon"><Search size={16} strokeWidth={1.8} /></span><span>Поиск</span></button
-                >
-                <button
-                    class:active={currentScreen === "history"}
-                    class="nav-btn"
-                    on:click={() => setScreen("history")}
-                    ><span class="nav-icon"><History size={16} strokeWidth={1.8} /></span><span>История</span><small class="nav-count">{libraryMode === "podcast" ? (appState.podcastHistory || []).length : (appState.history || []).length}</small></button
-                >
-                <button
-                    class:active={currentScreen === "rays"}
-                    class="nav-btn"
-                    on:click={() => setScreen("rays")}
-                    ><span class="nav-icon"><ListMusic size={16} strokeWidth={1.8} /></span><span>История лучей</span><small class="nav-count">{libraryMode === "podcast" ? (appState.podcastRays || []).length : (appState.rays || []).length}</small></button
-                >
-            </div>
-        </nav>
+		<div class="sidebar-footer">
+			<button class="side-action" type="button" on:click={addFolder}
+				><FolderPlus size={16} strokeWidth={1.8} /> Добавить папку {libraryMode === "podcast" ? "подкастов" : "музыки"}</button
+			>
+			<div class="add-actions">
+				<button
+					class="icon-add-button"
+					type="button"
+					title="Добавить ссылку"
+					aria-label="Добавить ссылку"
+					on:click={openAddLinkModal}
+				>
+					<Link size={17} strokeWidth={1.8} />
+				</button>
+				<button class="side-action add-file-button" type="button" on:click={addFiles}
+					><FilePlus2 size={16} strokeWidth={1.8} /> Добавить {libraryMode === "podcast" ? "выпуск" : "файл"}</button
+				>
+			</div>
+		</div>
+	</div>
 
-        <div class="sidebar-footer">
-            <button class="side-action" type="button" on:click={addFolder}
-                ><FolderPlus size={16} strokeWidth={1.8} /> Добавить папку {libraryMode === "podcast" ? "подкастов" : "музыки"}</button
-            >
-            <div class="add-actions">
-                <button
-                    class="icon-add-button"
-                    type="button"
-                    title="Добавить ссылку"
-                    aria-label="Добавить ссылку"
-                    on:click={openAddLinkModal}
-                >
-                    <Link size={17} strokeWidth={1.8} />
-                </button>
-                <button class="side-action add-file-button" type="button" on:click={addFiles}
-                    ><FilePlus2 size={16} strokeWidth={1.8} /> Добавить {libraryMode === "podcast" ? "выпуск" : "файл"}</button
-                >
-            </div>
-        </div>
-    </aside>
+	<div slot="main">
+		{#if currentScreen === "search"}
+			<SearchPage
+				{libraryMode}
+				{appState}
+				playback={$playbackState}
+				indexing={$indexingState}
+				bind:query
+				bind:searchInputEl
+				{libraryEmpty}
+				{podcastResults}
+				{visibleResults}
+				{emoFlowDirectionLabel}
+				{emoFlowSummary}
+				{openSettings}
+				{searchCurrentLibrary}
+				{togglePodcastRow}
+				{playOrToggle}
+				{openTrackMenu}
+				{externalPlayable}
+				{externalStatusLabel}
+				{externalState}
+				{podcastMeta}
+				{podcastProgressPercent}
+				{rowCurrent}
+				{rowIsBuildingRay}
+				{rowIcon}
+				{rowRaySeed}
+				{genreBadge}
+			/>
+		{/if}
 
-    <main class="content">
-        {#if currentScreen === "search"}
-            <SearchPage
-                {libraryMode}
-                {appState}
-                playback={$playbackState}
-                indexing={$indexingState}
-                bind:query
-                bind:searchInputEl
-                {libraryEmpty}
-                {podcastResults}
-                {visibleResults}
-                {emoFlowDirectionLabel}
-                {emoFlowSummary}
-                {openSettings}
-                {searchCurrentLibrary}
-                {togglePodcastRow}
-                {playOrToggle}
-                {openTrackMenu}
-                {externalPlayable}
-                {externalStatusLabel}
-                {externalState}
-                {podcastMeta}
-                {podcastProgressPercent}
-                {rowCurrent}
-                {rowIsBuildingRay}
-                {rowIcon}
-                {rowRaySeed}
-                {genreBadge}
-            />
-        {/if}
+		{#if currentScreen === "history"}
+			<HistoryPage
+				{libraryMode}
+				{appState}
+				playback={$playbackState}
+				indexing={$indexingState}
+				{openSettings}
+				{playPodcastHistoryItem}
+				{playOrToggle}
+				{openTrackMenu}
+				{podcastMeta}
+				{podcastHistorySourceLabel}
+				{rowCurrent}
+				{rowIcon}
+				{rowRaySeed}
+			/>
+		{/if}
 
-        {#if currentScreen === "history"}
-            <HistoryPage
-                {libraryMode}
-                {appState}
-                playback={$playbackState}
-                indexing={$indexingState}
-                {openSettings}
-                {playPodcastHistoryItem}
-                {playOrToggle}
-                {openTrackMenu}
-                {podcastMeta}
-                {podcastHistorySourceLabel}
-                {rowCurrent}
-                {rowIcon}
-                {rowRaySeed}
-            />
-        {/if}
+		{#if currentScreen === "ray"}
+			<RayPage
+				{libraryMode}
+				{appState}
+				playback={$playbackState}
+				indexing={$indexingState}
+				{currentTrack}
+				{rayBuild}
+				bind:selectedRayMode
+				{showInsight}
+				{auditRows}
+				{emoFlowDirectionLabel}
+				{emoFlowEmotionLabel}
+				{isRayBuilding}
+				{currentQueueIndex}
+				{podcastRayUpdating}
+				{podcastRayDropIndex}
+				{draggedPodcastRayIndex}
+				{musicRayUpdating}
+				{musicRayDropIndex}
+				{draggedMusicRayIndex}
+				{openSettings}
+				{toggleInsight}
+				{setPodcastContentMode}
+				{setPodcastSortMode}
+				{setMusicContentMode}
+				{setMusicSortMode}
+				{overPodcastRayItem}
+				{dropPodcastRayItem}
+				{beginPodcastRayDrag}
+				{finishPodcastRayDrag}
+				{togglePodcastRow}
+				{removePodcastRayItem}
+				{podcastMeta}
+				{podcastProgressPercent}
+				{trackById}
+				{playlistInsightLine}
+				{trackDebugLine}
+				{beginMusicRayDrag}
+				{overMusicRayItem}
+				{dropMusicRayItem}
+				{finishMusicRayDrag}
+				{playTrackFromQueue}
+				{openTrackMenu}
+			/>
+		{/if}
 
-        {#if currentScreen === "ray"}
-            <RayPage
-                {libraryMode}
-                {appState}
-                playback={$playbackState}
-                indexing={$indexingState}
-                {currentTrack}
-                {rayBuild}
-                bind:selectedRayMode
-                {showInsight}
-                {auditRows}
-                {emoFlowDirectionLabel}
-                {emoFlowEmotionLabel}
-                {isRayBuilding}
-                {currentQueueIndex}
-                {podcastRayUpdating}
-                {podcastRayDropIndex}
-                {draggedPodcastRayIndex}
-                {musicRayUpdating}
-                {musicRayDropIndex}
-                {draggedMusicRayIndex}
-                {openSettings}
-                {toggleInsight}
-                {setPodcastContentMode}
-                {setPodcastSortMode}
-                {setMusicContentMode}
-                {setMusicSortMode}
-                {overPodcastRayItem}
-                {dropPodcastRayItem}
-                {beginPodcastRayDrag}
-                {finishPodcastRayDrag}
-                {togglePodcastRow}
-                {removePodcastRayItem}
-                {podcastMeta}
-                {podcastProgressPercent}
-                {trackById}
-                {playlistInsightLine}
-                {trackDebugLine}
-                {beginMusicRayDrag}
-                {overMusicRayItem}
-                {dropMusicRayItem}
-                {finishMusicRayDrag}
-                {playTrackFromQueue}
-                {openTrackMenu}
-            />
-        {/if}
+		{#if currentScreen === "rays"}
+			<RaysPage
+				{libraryMode}
+				{appState}
+				indexing={$indexingState}
+				{openSettings}
+				{openPodcastRayHistory}
+				{resumeRay}
+				{podcastRayContentLabel}
+				{podcastRaySortLabel}
+			/>
+		{/if}
+	</div>
 
-        {#if currentScreen === "rays"}
-            <RaysPage
-                {libraryMode}
-                {appState}
-                indexing={$indexingState}
-                {openSettings}
-                {openPodcastRayHistory}
-                {resumeRay}
-                {podcastRayContentLabel}
-                {podcastRaySortLabel}
-            />
-        {/if}
-    </main>
-
-    <PlayerBar
-        {playerTitle}
-        {playingPodcast}
-        {currentTrackMeta}
-        {playerArtist}
-        {playerSubline}
-        playbackStatus={$playbackState.status}
-        playbackLastError={$playbackState.lastError}
-        playbackCurrentGenre={$playbackState.currentGenre || ""}
-        {playerEmoFlowReason}
-        repeatRay={settingsPayload.repeatRay}
-        {playbackSelection}
-        {seekValue}
-        positionLabel={currentTrack.positionLabel || "0:00"}
-        durationLabel={currentTrack.durationLabel || "0:00"}
-        {volumeIconLevel}
-        {volumeMuteBusy}
-        {displayedVolume}
-        accentReactive={$indexingState.isIndexing}
-        on:repeat={toggleRepeatRay}
-        on:previous={playPrevious}
-        on:togglePause={togglePause}
-        on:next={playNext}
-        on:seekPreview={(e) => previewSeek(e.detail)}
-        on:seekCommit={(e) => commitSeek(e.detail)}
-        on:mute={togglePlayerMute}
-        on:volumePreview={(e) => setPlayerVolume(e.detail)}
-        on:volumeCommit={(e) => commitVolume(e.detail)}
-    />
-</div>
+	<div slot="player">
+		<PlayerBar
+			{playerTitle}
+			{playingPodcast}
+			{currentTrackMeta}
+			{playerArtist}
+			{playerSubline}
+			playbackStatus={$playbackState.status}
+			playbackLastError={$playbackState.lastError}
+			playbackCurrentGenre={$playbackState.currentGenre || ""}
+			{playerEmoFlowReason}
+			repeatRay={settingsPayload.repeatRay}
+			{playbackSelection}
+			{seekValue}
+			positionLabel={currentTrack.positionLabel || "0:00"}
+			durationLabel={currentTrack.durationLabel || "0:00"}
+			{volumeIconLevel}
+			{volumeMuteBusy}
+			{displayedVolume}
+			accentReactive={$indexingState.isIndexing}
+			on:repeat={toggleRepeatRay}
+			on:previous={playPrevious}
+			on:togglePause={togglePause}
+			on:next={playNext}
+			on:seekPreview={(e) => previewSeek(e.detail)}
+			on:seekCommit={(e) => commitSeek(e.detail)}
+			on:mute={togglePlayerMute}
+			on:volumePreview={(e) => setPlayerVolume(e.detail)}
+			on:volumeCommit={(e) => commitVolume(e.detail)}
+		/>
+	</div>
+</AppLayout>
 
 {#if contextMenu}
     <div
