@@ -50,7 +50,10 @@ export function putExternalDownload(job: ExternalDownloadJob) {
 	updateJob(job);
 }
 
-export function externalJobFor(map: Map<string, ExternalDownloadJob> | null | undefined, item: { id?: string } | null | undefined) {
+export function externalJobFor(
+	map: Map<string, ExternalDownloadJob> | null | undefined,
+	item: { id?: string } | null | undefined,
+) {
 	return map?.get?.(item?.id || "") || null;
 }
 

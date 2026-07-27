@@ -1,13 +1,11 @@
 export type LibraryMode = "music" | "podcast";
 
-export const normalizeLibraryMode = (mode: unknown): LibraryMode =>
-	mode === "podcast" ? "podcast" : "music";
+export const normalizeLibraryMode = (mode: unknown): LibraryMode => (mode === "podcast" ? "podcast" : "music");
 
 // Visual chrome follows the library the user is browsing. Playback kind is
 // intentionally separate so a still-playing podcast cannot pin the UI in
 // podcast mode after the user switches back to music.
-export const resolveVisualMode = (libraryMode: unknown): LibraryMode =>
-	normalizeLibraryMode(libraryMode);
+export const resolveVisualMode = (libraryMode: unknown): LibraryMode => normalizeLibraryMode(libraryMode);
 
 export const hasPlaybackSelection = (
 	playback: { currentTrackId?: string } | null | undefined,

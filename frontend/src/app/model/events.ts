@@ -4,21 +4,10 @@ import { api } from "../../shared/api";
 import { emoFlowState } from "../../entities/emoflow";
 import { isPodcastItemId } from "../../entities/podcast";
 import { rayBuildState, type RayBuildState } from "../../entities/ray";
-import {
-	bindExternalDownloadEvents,
-	unbindExternalDownloadEvents,
-} from "../../features/external-link";
+import { bindExternalDownloadEvents, unbindExternalDownloadEvents } from "../../features/external-link";
 import { playbackState, syncPlayback, type PlaybackState } from "../../entities/playback";
 import type { IndexingState } from "./types";
-import {
-	applySnapshot,
-	indexingState,
-	reindexStatus,
-	runSearch,
-	searchQuery,
-	showToast,
-	syncPayload,
-} from "./store";
+import { applySnapshot, indexingState, reindexStatus, runSearch, searchQuery, showToast, syncPayload } from "./store";
 
 let snapshotBound = false;
 let reindexBound = false;

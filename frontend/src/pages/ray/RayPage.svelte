@@ -1,11 +1,5 @@
 <script lang="ts">
-import {
-	Settings,
-	Play,
-	Pause,
-	GripVertical,
-	Trash2,
-} from "@lucide/svelte";
+import { Settings, Play, Pause, GripVertical, Trash2 } from "@lucide/svelte";
 import { IconButton, UIButton } from "../../shared/ui";
 import { RayTrackRow } from "../../entities/ray";
 import { PodcastProgressBar } from "../../entities/podcast";

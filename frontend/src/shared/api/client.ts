@@ -172,8 +172,7 @@ export const api = {
 						respectReducedMotion: true,
 					},
 				}),
-	saveSettings: (payload: Record<string, unknown>) =>
-		hasWails() ? SaveSettings(payload as any) : bootstrapFallback(),
+	saveSettings: (payload: Record<string, unknown>) => (hasWails() ? SaveSettings(payload as any) : bootstrapFallback()),
 	skipToTrackInQueue: (trackId: string) => (hasWails() ? SkipToTrackInQueue(trackId) : bootstrapFallback()),
 	testONNXRuntime: (payload: Record<string, unknown>) =>
 		hasWails()

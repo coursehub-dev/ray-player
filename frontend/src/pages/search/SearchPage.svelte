@@ -1,14 +1,5 @@
 <script lang="ts">
-import {
-	Search,
-	Settings,
-	Play,
-	Pause,
-	LoaderCircle,
-	Sparkles,
-	CheckCircle2,
-	FileText,
-} from "@lucide/svelte";
+import { Search, Settings, Play, Pause, LoaderCircle, Sparkles, CheckCircle2, FileText } from "@lucide/svelte";
 import { IconButton } from "../../shared/ui";
 import { TrackMetaLine } from "../../entities/track";
 import { PodcastProgressBar } from "../../entities/podcast";

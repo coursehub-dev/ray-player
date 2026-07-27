@@ -16,12 +16,7 @@ import {
 import { rayBuildState } from "./entities/ray";
 import { cssVariables, emoFlowState } from "./entities/emoflow";
 import { UISlider, SettingsSwitch } from "./shared/ui";
-import {
-	AddLinkModal,
-	externalDownloads,
-	mergedDownloadState,
-	putExternalDownload,
-} from "./features/external-link";
+import { AddLinkModal, externalDownloads, mergedDownloadState, putExternalDownload } from "./features/external-link";
 import { DoctorModal } from "./pages/settings";
 import { AppLayout } from "./widgets/app-layout";
 import { PlayerBar } from "./widgets/player-bar";
@@ -76,18 +71,7 @@ import {
 	resolvePlayerTitle,
 	resolveVisualMode,
 } from "./entities/playback";
-import {
-	Search,
-	History,
-	FolderPlus,
-	FilePlus2,
-	ListMusic,
-	X,
-	Mic,
-	Music2,
-	Link,
-	Stethoscope,
-} from "@lucide/svelte";
+import { Search, History, FolderPlus, FilePlus2, ListMusic, X, Mic, Music2, Link, Stethoscope } from "@lucide/svelte";
 
 let appState = {
 	library: [],
