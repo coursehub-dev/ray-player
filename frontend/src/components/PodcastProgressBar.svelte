@@ -1,8 +1,12 @@
-<script>
-export let item = null;
+<script lang="ts">
+export let item: {
+	completedRatio?: number;
+	lastPosition?: number;
+	duration?: number;
+} | null = null;
 export let className = "";
 
-const clamp = (value) => Math.max(0, Math.min(1, value));
+const clamp = (value: number) => Math.max(0, Math.min(1, value));
 
 $: stored = Number(item?.completedRatio);
 $: position = Number(item?.lastPosition) || 0;

@@ -1,3 +1,5 @@
+// Complex colour/motion math; typed gradually.
+// @ts-nocheck
 import { derived, writable } from "svelte/store";
 
 const DEFAULT_SETTINGS = {

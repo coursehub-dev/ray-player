@@ -1,20 +1,27 @@
-<script>
+<script lang="ts">
 import { createEventDispatcher } from "svelte";
 import { GripVertical, LoaderCircle, Pause, Play, Sparkles } from "@lucide/svelte";
 import TrackMetaLine from "./TrackMetaLine.svelte";
 
-export let item;
+export let item: any;
 export let index = 0;
-export let playback = {};
+export let playback: Record<string, any> = {};
 export let showInsight = false;
 export let insightLine = "";
 export let debugLine = "";
 export let dropTarget = false;
 export let dragging = false;
 
-const dispatch = createEventDispatcher();
+const dispatch = createEventDispatcher<{
+	play: { trackId: string };
+	menu: { event: MouseEvent; trackId: string };
+	dragstart: { event: DragEvent; item: any; index: number };
+	dragover: { event: DragEvent; index: number };
+	drop: { event: DragEvent; index: number };
+	dragend: void;
+}>();
 
-const roleLabels = {
+const roleLabels: Record<string, string> = {
 	next: "далее",
 	nearby: "рядом",
 	discovery: "открытие",
@@ -24,7 +31,7 @@ const roleLabels = {
 	seed: "seed",
 };
 
-const roleName = (value) => {
+const roleName = (value: unknown) => {
 	const normalized = String(value || "")
 		.trim()
 		.toLowerCase();
@@ -37,11 +44,11 @@ const open = () => {
 	}
 };
 
-const openMenu = (event) => {
+const openMenu = (event: MouseEvent | KeyboardEvent) => {
 	event.preventDefault();
 	event.stopPropagation();
 	dispatch("menu", {
-		event,
+		event: event as MouseEvent,
 		trackId: item?.trackId,
 	});
 };

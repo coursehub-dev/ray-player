@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./playerUi.js";
+import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./playerUi.ts";
 
 test("visual mode follows selected library, not currently playing media", () => {
 	assert.equal(resolveVisualMode("podcast"), "podcast");

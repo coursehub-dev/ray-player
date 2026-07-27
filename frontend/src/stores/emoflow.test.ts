@@ -1,9 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { interpolateTrackPalette, mergeEmoFlowState } from "./emoflow.js";
+import { interpolateTrackPalette, mergeEmoFlowState } from "./emoflow.ts";
 
-function palette(hue) {
+type Palette = {
+	accent: string;
+	accentSoft: string;
+	accentHot: string;
+	background: string;
+	surface: string;
+	glow: string;
+	glowSoft: string;
+	ring: string;
+	progress: string;
+	icon: string;
+	accentOn: string;
+};
+
+function palette(hue: number): Palette {
 	const opaque = `oklch(62% 0.180 ${hue})`;
 	const translucent = `oklch(62% 0.180 ${hue} / 0.200)`;
 	return {

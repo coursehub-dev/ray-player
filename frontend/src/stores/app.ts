@@ -4,10 +4,50 @@ import { api } from "../shared/api";
 import { emoFlowState, syncEmoFlowFromPayload } from "./emoflow";
 import { isPodcastItemId } from "../entities/podcast";
 import { bindExternalDownloadEvents, unbindExternalDownloadEvents } from "./externalDownloads";
-import { playbackState, syncPlayback } from "../entities/playback";
+import { playbackState, syncPlayback, type PlaybackState } from "../entities/playback";
 
-export const screen = writable("search");
-export const state = writable({
+/** App snapshot from Go — kept intentionally loose during gradual typing. */
+export type AppSnapshot = Record<string, any>;
+
+export type ToastPayload = {
+	type?: string;
+	kind?: string;
+	title?: string;
+	message?: string;
+	duration?: number;
+} | null;
+
+export type RayBuildState = {
+	status: string;
+	seedTrackId: string;
+	requestId: number;
+	startedAt: number;
+	finishedAt: number;
+	lastError: string;
+};
+
+export type IndexingState = {
+	isIndexing: boolean;
+	libraryCount: number;
+	processed: number;
+	total: number;
+	queued: number;
+	phase: string;
+	currentPath: string;
+};
+
+export type ReindexStatus = {
+	active: boolean;
+	index: number;
+	total: number;
+	stage: string;
+	state: string;
+	message: string;
+	trackId: string;
+	path: string;
+};
+
+const initialSnapshot: AppSnapshot = {
 	library: [],
 	podcasts: [],
 	podcastRay: {
@@ -27,9 +67,12 @@ export const state = writable({
 	rays: [],
 	queue: [],
 	libraryStat: { tracks: 0 },
-});
+};
+
+export const screen = writable("search");
+export const state = writable<AppSnapshot>({ ...initialSnapshot });
 export { playbackState };
-export const rayBuildState = writable({
+export const rayBuildState = writable<RayBuildState>({
 	status: "idle",
 	seedTrackId: "",
 	requestId: 0,
@@ -39,8 +82,8 @@ export const rayBuildState = writable({
 });
 export const selectedTrackId = writable("");
 export const searchQuery = writable("");
-export const searchResults = writable([]);
-export const reindexStatus = writable({
+export const searchResults = writable<unknown[]>([]);
+export const reindexStatus = writable<ReindexStatus>({
 	active: false,
 	index: 0,
 	total: 0,
@@ -50,7 +93,7 @@ export const reindexStatus = writable({
 	trackId: "",
 	path: "",
 });
-export const indexingState = writable({
+export const indexingState = writable<IndexingState>({
 	isIndexing: false,
 	libraryCount: 0,
 	processed: 0,
@@ -59,20 +102,20 @@ export const indexingState = writable({
 	phase: "idle",
 	currentPath: "",
 });
-export const toast = writable(null);
+export const toast = writable<ToastPayload>(null);
 export { emoFlowState } from "./emoflow";
 
 let snapshotBound = false;
 let reindexBound = false;
-let timer = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
 
-function showToast(payload) {
+function showToast(payload: Exclude<ToastPayload, null>) {
 	toast.set(payload);
 	if (timer) clearTimeout(timer);
 	timer = setTimeout(() => toast.set(null), payload?.duration || 3200);
 }
 
-function syncRayBuild(payload) {
+function syncRayBuild(payload: any) {
 	const build = payload?.rayBuild || payload;
 	if (build?.status) {
 		rayBuildState.set(build);
@@ -101,7 +144,7 @@ export async function bootstrap() {
 	await runSearch(get(searchQuery));
 }
 
-export async function syncPayload(promise) {
+export async function syncPayload(promise: Promise<any>) {
 	const payload = await promise;
 	if (payload?.library) {
 		state.set(payload);
@@ -117,18 +160,18 @@ export async function syncPayload(promise) {
 	return payload;
 }
 
-export async function runSearch(query) {
+export async function runSearch(query: string) {
 	searchQuery.set(query);
 	const result = await api.searchTracks(query);
 	searchResults.set(Array.isArray(result) ? result : []);
 }
 
 export function bindSnapshotEvents() {
-	if (snapshotBound || !globalThis?.window?.runtime?.EventsOn) {
+	if (snapshotBound || !(globalThis as any)?.window?.runtime?.EventsOn) {
 		return;
 	}
 	snapshotBound = true;
-	EventsOn("app:snapshot", (payload) => {
+	EventsOn("app:snapshot", (payload: any) => {
 		if (payload?.library) {
 			state.set(payload);
 			syncPlayback(payload);
@@ -140,7 +183,7 @@ export function bindSnapshotEvents() {
 			}));
 		}
 	});
-	EventsOn("playback:update", (payload) => {
+	EventsOn("playback:update", (payload: PlaybackState) => {
 		if (!payload?.status) return;
 
 		const current = get(playbackState);
@@ -158,12 +201,12 @@ export function bindSnapshotEvents() {
 
 		playbackState.set(payload);
 	});
-	EventsOn("ray:build-state", (payload) => {
+	EventsOn("ray:build-state", (payload: RayBuildState) => {
 		if (payload?.status) {
 			rayBuildState.set(payload);
 		}
 	});
-	EventsOn("emoflow:update", (payload) => {
+	EventsOn("emoflow:update", (payload: any) => {
 		if (payload) {
 			emoFlowState.set(payload);
 		}
@@ -171,10 +214,10 @@ export function bindSnapshotEvents() {
 	EventsOn("library:analyzed", async () => {
 		await runSearch(get(searchQuery));
 	});
-	EventsOn("indexing:update", (payload) => {
+	EventsOn("indexing:update", (payload: IndexingState) => {
 		if (payload) indexingState.set(payload);
 	});
-	EventsOn("import:result", (r) => {
+	EventsOn("import:result", (r: any) => {
 		showToast({
 			type: "success",
 			title: `${r.added || 0} tracks added`,
@@ -182,7 +225,7 @@ export function bindSnapshotEvents() {
 			duration: 3200,
 		});
 	});
-	EventsOn("playback:failed", (failure) => {
+	EventsOn("playback:failed", (failure: any) => {
 		showToast({
 			type: "error",
 			title: `Skipped unavailable track`,
@@ -190,7 +233,7 @@ export function bindSnapshotEvents() {
 			duration: 3200,
 		});
 	});
-	EventsOn("emoflow:technical_skip", (payload) => {
+	EventsOn("emoflow:technical_skip", (payload: any) => {
 		showToast({
 			type: "warning",
 			title: "Не удалось воспроизвести файл",
@@ -204,11 +247,11 @@ export function bindSnapshotEvents() {
 }
 
 export function bindReindexEvents() {
-	if (reindexBound || !globalThis?.window?.runtime?.EventsOn) {
+	if (reindexBound || !(globalThis as any)?.window?.runtime?.EventsOn) {
 		return;
 	}
 	reindexBound = true;
-	EventsOn("app:reindex:progress", (payload) => {
+	EventsOn("app:reindex:progress", (payload: any) => {
 		if (!payload) return;
 		reindexStatus.set({
 			active: true,
@@ -221,7 +264,7 @@ export function bindReindexEvents() {
 			path: payload.path || "",
 		});
 	});
-	EventsOn("app:reindex:done", async (payload) => {
+	EventsOn("app:reindex:done", async (payload: any) => {
 		reindexStatus.set({
 			active: false,
 			index: payload?.total || 0,
@@ -237,7 +280,7 @@ export function bindReindexEvents() {
 }
 
 export function unbindSnapshotEvents() {
-	if (snapshotBound && globalThis?.window?.runtime?.EventsOff) {
+	if (snapshotBound && (globalThis as any)?.window?.runtime?.EventsOff) {
 		for (const name of [
 			"app:snapshot",
 			"playback:update",
@@ -254,7 +297,7 @@ export function unbindSnapshotEvents() {
 		}
 		snapshotBound = false;
 	}
-	if (reindexBound && globalThis?.window?.runtime?.EventsOff) {
+	if (reindexBound && (globalThis as any)?.window?.runtime?.EventsOff) {
 		EventsOff("app:reindex:progress");
 		EventsOff("app:reindex:done");
 		reindexBound = false;

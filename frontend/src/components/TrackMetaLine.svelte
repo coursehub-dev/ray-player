@@ -1,9 +1,9 @@
-<script>
-export let track = null;
+<script lang="ts">
+export let track: Record<string, any> | null = null;
 export let artist = "";
 export let genreLabel = "";
 export let genrePrimary = "";
-export let genreTags = [];
+export let genreTags: any[] = [];
 export let maxGenres = 2;
 export let showBpm = false;
 export let bpm = 0;
@@ -11,10 +11,10 @@ export let tempo = 0;
 export let tempoConfidence = 0;
 export let className = "";
 
-const tagLabel = (tag) =>
+const tagLabel = (tag: any) =>
 	String(tag?.label ?? tag?.Label ?? tag?.name ?? tag?.Name ?? tag?.genre ?? tag?.Genre ?? "").trim();
 
-const compactGenreText = (label, primary, tags, limit) => {
+const compactGenreText = (label: unknown, primary: unknown, tags: unknown, limit: number) => {
 	const preparedLabel = String(label || "").trim();
 	if (preparedLabel) return preparedLabel;
 
@@ -30,7 +30,7 @@ const compactGenreText = (label, primary, tags, limit) => {
 	return String(primary || "").trim();
 };
 
-const formatBpm = (value, fallback, confidence) => {
+const formatBpm = (value: unknown, fallback: unknown, confidence: unknown) => {
 	const resolved = Math.round(Number(value || fallback || 0));
 	if (!showBpm || !resolved) return "";
 	return Number(confidence || 0) > 0 && Number(confidence || 0) < 0.35 ? `~${resolved} BPM` : `${resolved} BPM`;

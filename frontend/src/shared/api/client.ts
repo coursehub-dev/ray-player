@@ -55,11 +55,17 @@ import {
 import { bootstrapFallback } from "../../lib/mockWails";
 import { initialPlaybackState } from "../../entities/playback/model";
 
-export const hasWails = () => Boolean(globalThis?.window?.go?.main?.App);
-const appCall = (name, ...args) => globalThis?.window?.go?.main?.App?.[name]?.(...args);
+type WailsApp = Record<string, ((...args: unknown[]) => unknown) | undefined>;
+
+const wailsWindow = () => (globalThis as { window?: { go?: { main?: { App?: WailsApp } } } }).window;
+
+export const hasWails = (): boolean => Boolean(wailsWindow()?.go?.main?.App);
+
+const appCall = (name: string, ...args: unknown[]): unknown => wailsWindow()?.go?.main?.App?.[name]?.(...args);
 
 const stoppedPlayback = { ...initialPlaybackState };
 
+/** Facade over generated Wails bindings. Return types stay loose until Go models are mirrored in entities. */
 export const api = {
 	bootstrap: () => (hasWails() ? Bootstrap() : bootstrapFallback()),
 	snapshot: () => (hasWails() ? Snapshot() : bootstrapFallback()),
@@ -69,13 +75,13 @@ export const api = {
 	addPodcastFolder: () => (hasWails() ? AddPodcastFolder() : bootstrapFallback()),
 	addPodcastFiles: () => (hasWails() ? AddPodcastFiles() : bootstrapFallback()),
 
-	addExternalLink: (url, libraryType) =>
+	addExternalLink: (url: string, libraryType: string) =>
 		hasWails() ? AddExternalLink(url, libraryType) : Promise.reject(new Error("Wails runtime unavailable")),
-	cancelExternalDownload: (jobId) => (hasWails() ? CancelExternalDownload(jobId) : Promise.resolve()),
-	retryExternalDownload: (jobId) => (hasWails() ? RetryExternalDownload(jobId) : Promise.resolve()),
-	deleteExternalItem: (itemId, libraryType, deleteFile = false) =>
+	cancelExternalDownload: (jobId: string) => (hasWails() ? CancelExternalDownload(jobId) : Promise.resolve()),
+	retryExternalDownload: (jobId: string) => (hasWails() ? RetryExternalDownload(jobId) : Promise.resolve()),
+	deleteExternalItem: (itemId: string, libraryType: string, deleteFile = false) =>
 		hasWails() ? DeleteExternalItem(itemId, libraryType, deleteFile) : Promise.resolve(),
-	openExternalSource: (url) => (hasWails() ? OpenExternalSource(url) : Promise.resolve()),
+	openExternalSource: (url: string) => (hasWails() ? OpenExternalSource(url) : Promise.resolve()),
 	getExternalMediaSettings: () =>
 		hasWails()
 			? GetExternalMediaSettings()
@@ -84,25 +90,26 @@ export const api = {
 					ffmpegPath: "",
 					ytDlpDownloadDir: "",
 				}),
-	saveExternalMediaSettings: (settings) => (hasWails() ? SaveExternalMediaSettings(settings) : Promise.resolve()),
-	testYtDlp: (path) =>
+	saveExternalMediaSettings: (settings: Record<string, unknown>) =>
+		hasWails() ? SaveExternalMediaSettings(settings as any) : Promise.resolve(),
+	testYtDlp: (path: string) =>
 		hasWails() ? TestYtDlp(path) : Promise.resolve({ ok: false, error: "Wails runtime unavailable" }),
 
-	searchPodcasts: (query) => (hasWails() ? SearchPodcasts(query) : Promise.resolve([])),
-	updatePodcastProgress: (itemId, position, duration) =>
+	searchPodcasts: (query: string) => (hasWails() ? SearchPodcasts(query) : Promise.resolve([])),
+	updatePodcastProgress: (itemId: string, position: number, duration: number) =>
 		hasWails()
 			? UpdatePodcastProgress(itemId, position, duration)
 			: Promise.resolve({ id: itemId, lastPosition: position, duration }),
-	playPodcast: (itemId) => (hasWails() ? PlayPodcast(itemId) : bootstrapFallback()),
-	playPodcastRayItem: (itemId) => (hasWails() ? PlayPodcastRayItem(itemId) : bootstrapFallback()),
+	playPodcast: (itemId: string) => (hasWails() ? PlayPodcast(itemId) : bootstrapFallback()),
+	playPodcastRayItem: (itemId: string) => (hasWails() ? PlayPodcastRayItem(itemId) : bootstrapFallback()),
 	nextPodcast: () => (hasWails() ? NextPodcast() : bootstrapFallback()),
 	previousPodcast: () => (hasWails() ? PreviousPodcast() : bootstrapFallback()),
-	openPodcastRayHistory: (rayId) => (hasWails() ? OpenPodcastRayHistory(rayId) : bootstrapFallback()),
-	setPodcastRayContentMode: (mode) => (hasWails() ? SetPodcastRayContentMode(mode) : bootstrapFallback()),
-	setPodcastRaySortMode: (mode) => (hasWails() ? SetPodcastRaySortMode(mode) : bootstrapFallback()),
-	movePodcastRayItem: (from, to) => (hasWails() ? MovePodcastRayItem(from, to) : bootstrapFallback()),
-	removePodcastRayItem: (itemId) => (hasWails() ? RemovePodcastRayItem(itemId) : bootstrapFallback()),
-	importPaths: (paths) =>
+	openPodcastRayHistory: (rayId: string) => (hasWails() ? OpenPodcastRayHistory(rayId) : bootstrapFallback()),
+	setPodcastRayContentMode: (mode: string) => (hasWails() ? SetPodcastRayContentMode(mode) : bootstrapFallback()),
+	setPodcastRaySortMode: (mode: string) => (hasWails() ? SetPodcastRaySortMode(mode) : bootstrapFallback()),
+	movePodcastRayItem: (from: number, to: number) => (hasWails() ? MovePodcastRayItem(from, to) : bootstrapFallback()),
+	removePodcastRayItem: (itemId: string) => (hasWails() ? RemovePodcastRayItem(itemId) : bootstrapFallback()),
+	importPaths: (paths: string[]) =>
 		hasWails()
 			? appCall("ImportPaths", paths)
 			: Promise.resolve({
@@ -111,9 +118,9 @@ export const api = {
 					alreadyPresent: 0,
 					added: 0,
 					skipped: 0,
-					errors: [],
+					errors: [] as string[],
 				}),
-	importPodcastPaths: (paths) =>
+	importPodcastPaths: (paths: string[]) =>
 		hasWails()
 			? appCall("ImportPodcastPaths", paths)
 			: Promise.resolve({
@@ -121,28 +128,31 @@ export const api = {
 					audioFound: 0,
 					addedOrUpdated: 0,
 					skipped: 0,
-					errors: [],
+					errors: [] as string[],
 				}),
-	searchTracks: (query) => (hasWails() ? SearchTracks(query) : []),
-	playTrack: (trackId) => (hasWails() ? PlayTrack(trackId) : bootstrapFallback()),
-	playTrackWithMode: (trackId, mode) => (hasWails() ? PlayTrackWithMode(trackId, mode) : bootstrapFallback()),
-	setMusicRayContentMode: (mode) => (hasWails() ? SetMusicRayContentMode(mode) : bootstrapFallback()),
-	setMusicRaySortMode: (mode) => (hasWails() ? SetMusicRaySortMode(mode) : bootstrapFallback()),
-	resumeRay: (rayId) => (hasWails() ? ResumeRay(rayId) : bootstrapFallback()),
+	searchTracks: (query: string) => (hasWails() ? SearchTracks(query) : []),
+	playTrack: (trackId: string) => (hasWails() ? PlayTrack(trackId) : bootstrapFallback()),
+	playTrackWithMode: (trackId: string, mode: string) =>
+		hasWails() ? PlayTrackWithMode(trackId, mode) : bootstrapFallback(),
+	setMusicRayContentMode: (mode: string) => (hasWails() ? SetMusicRayContentMode(mode) : bootstrapFallback()),
+	setMusicRaySortMode: (mode: string) => (hasWails() ? SetMusicRaySortMode(mode) : bootstrapFallback()),
+	resumeRay: (rayId: string) => (hasWails() ? ResumeRay(rayId) : bootstrapFallback()),
 	togglePlay: () => (hasWails() ? TogglePlay() : Promise.resolve(stoppedPlayback)),
 	togglePause: () => (hasWails() ? TogglePause() : stoppedPlayback),
 	nextTrack: () => (hasWails() ? NextTrack() : bootstrapFallback()),
 	previousTrack: () => (hasWails() ? PreviousTrack() : bootstrapFallback()),
-	removeFromQueue: (trackId) => (hasWails() ? RemoveFromQueue(trackId) : bootstrapFallback()),
-	moveQueueItem: (trackId, newIndex) => (hasWails() ? MoveQueueItem(trackId, newIndex) : bootstrapFallback()),
-	seek: (positionMs) => (hasWails() ? Seek(positionMs) : { positionMs }),
-	setVolumePreview: (volume) =>
+	removeFromQueue: (trackId: string) => (hasWails() ? RemoveFromQueue(trackId) : bootstrapFallback()),
+	moveQueueItem: (trackId: string, newIndex: number) =>
+		hasWails() ? MoveQueueItem(trackId, newIndex) : bootstrapFallback(),
+	seek: (positionMs: number) => (hasWails() ? Seek(positionMs) : { positionMs }),
+	setVolumePreview: (volume: number) =>
 		hasWails() ? appCall("SetVolumePreview", volume) || Promise.resolve({ volume }) : Promise.resolve({ volume }),
-	setVolume: (volume) => (hasWails() ? SetVolume(volume) : { volume }),
+	setVolume: (volume: number) => (hasWails() ? SetVolume(volume) : { volume }),
 	toggleMute: () => (hasWails() ? ToggleMute() : Promise.resolve(null)),
-	setNormalizePodcastVolume: (enabled) => (hasWails() ? SetNormalizePodcastVolume(enabled) : Promise.resolve(null)),
-	chooseDirectory: (title) => (hasWails() ? ChooseDirectory(title) : Promise.resolve("")),
-	chooseFile: (title, pattern) => (hasWails() ? ChooseFile(title, pattern) : Promise.resolve("")),
+	setNormalizePodcastVolume: (enabled: boolean) =>
+		hasWails() ? SetNormalizePodcastVolume(enabled) : Promise.resolve(null),
+	chooseDirectory: (title: string) => (hasWails() ? ChooseDirectory(title) : Promise.resolve("")),
+	chooseFile: (title: string, pattern: string) => (hasWails() ? ChooseFile(title, pattern) : Promise.resolve("")),
 	getSettings: () =>
 		hasWails()
 			? GetSettings()
@@ -162,20 +172,21 @@ export const api = {
 						respectReducedMotion: true,
 					},
 				}),
-	saveSettings: (payload) => (hasWails() ? SaveSettings(payload) : bootstrapFallback()),
-	skipToTrackInQueue: (trackId) => (hasWails() ? SkipToTrackInQueue(trackId) : bootstrapFallback()),
-	testONNXRuntime: (payload) =>
+	saveSettings: (payload: Record<string, unknown>) =>
+		hasWails() ? SaveSettings(payload as any) : bootstrapFallback(),
+	skipToTrackInQueue: (trackId: string) => (hasWails() ? SkipToTrackInQueue(trackId) : bootstrapFallback()),
+	testONNXRuntime: (payload: Record<string, unknown>) =>
 		hasWails()
-			? TestONNXRuntime(payload)
+			? TestONNXRuntime(payload as any)
 			: Promise.resolve({
 					ok: false,
 					runtimePath: "",
 					message: "Wails unavailable",
 					latencyMs: 0,
 				}),
-	testMiniLM: (payload) =>
+	testMiniLM: (payload: Record<string, unknown>) =>
 		hasWails()
-			? TestMiniLM(payload)
+			? TestMiniLM(payload as any)
 			: Promise.resolve({
 					ok: false,
 					runtimePath: "",
@@ -186,10 +197,10 @@ export const api = {
 					latencyMs: 0,
 					embeddingDim: 0,
 				}),
-	testFFmpeg: (path) => (hasWails() ? TestFFmpeg(path) : Promise.resolve("Wails unavailable")),
-	testEssentia: (payload) =>
+	testFFmpeg: (path: string) => (hasWails() ? TestFFmpeg(path) : Promise.resolve("Wails unavailable")),
+	testEssentia: (payload: Record<string, unknown>) =>
 		hasWails()
-			? TestEssentia(payload)
+			? TestEssentia(payload as any)
 			: Promise.resolve({
 					ok: false,
 					runtimePath: "",
@@ -210,7 +221,7 @@ export const api = {
 						loaded: false,
 						message: "Wails unavailable",
 					},
-					heads: [],
+					heads: [] as unknown[],
 					message: "Wails unavailable",
 					latencyMs: 0,
 				}),
@@ -223,7 +234,7 @@ export const api = {
 					total: 0,
 					message: "Wails unavailable",
 				}),
-	doctorCheck: (component, payload) =>
+	doctorCheck: (component: string, payload: Record<string, unknown>) =>
 		hasWails()
 			? appCall("DoctorCheck", component, payload)
 			: Promise.resolve({
@@ -233,7 +244,7 @@ export const api = {
 					message: "Wails runtime unavailable",
 					repairable: false,
 				}),
-	doctorRepair: (component, payload) =>
+	doctorRepair: (component: string, payload: Record<string, unknown>) =>
 		hasWails()
 			? appCall("DoctorRepair", component, payload)
 			: Promise.resolve({
@@ -246,6 +257,8 @@ export const api = {
 					},
 					patch: {},
 				}),
-	rayAudit: (trackId, mode, limit = 20) =>
-		hasWails() ? appCall("RayAudit", trackId, mode, limit) : Promise.resolve({ seedTrackId: trackId, mode, rows: [] }),
+	rayAudit: (trackId: string, mode: string, limit = 20) =>
+		hasWails()
+			? appCall("RayAudit", trackId, mode, limit)
+			: Promise.resolve({ seedTrackId: trackId, mode, rows: [] as unknown[] }),
 };

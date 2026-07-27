@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "./doctorUi.js";
+import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "./doctorUi.ts";
 
 test("doctor initializes every row as pending", () => {
 	const state = createDoctorState();

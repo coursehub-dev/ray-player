@@ -13,8 +13,7 @@ export function applyPlayTrackPayload(payload: unknown) {
 	const snapshot = payload as { library?: unknown; current?: { status?: string } } | null | undefined;
 	if (!snapshot?.library) return;
 
-	// stores/app is still JS; cast at the gradual-TS boundary
-	(state.set as (value: unknown) => void)(snapshot);
+	state.set(snapshot);
 	if (snapshot.current?.status) {
 		applyPlaybackPatch(snapshot.current);
 	}
@@ -54,7 +53,7 @@ export function reportPlayRayError(error: unknown) {
 		error && typeof error === "object" && "message" in error
 			? String((error as { message?: unknown }).message || "")
 			: "";
-	(toast.set as (value: unknown) => void)({
+	toast.set({
 		kind: "error",
 		message: message || "Не удалось построить луч",
 	});

@@ -14,7 +14,7 @@
 		"preview": "vite preview",
 		"format": "biome format --write .",
 		"lint": "biome lint .",
-		"test": "node --test",
+		"test": "node --experimental-strip-types --test",
 		"check": "biome ci --diagnostic-level=error .",
 		"check:types": "svelte-check --tsconfig ./tsconfig.json",
 		"deps:check": "npm ls --depth=0"

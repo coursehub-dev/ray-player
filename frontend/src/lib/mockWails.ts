@@ -1,12 +1,12 @@
 export async function bootstrapFallback() {
 	return {
-		library: [],
-		current: { volume: 0.58, queue: [] },
-		podcastHistory: [],
-		podcastRays: [],
-		history: [],
-		rays: [],
-		queue: [],
+		library: [] as unknown[],
+		current: { volume: 0.58, queue: [] as unknown[] },
+		podcastHistory: [] as unknown[],
+		podcastRays: [] as unknown[],
+		history: [] as unknown[],
+		rays: [] as unknown[],
+		queue: [] as unknown[],
 		libraryStat: { tracks: 0 },
 		emoFlow: {},
 		emoFlowUiSettings: {

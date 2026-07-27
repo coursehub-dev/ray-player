@@ -1,7 +1,15 @@
 import { writable } from "svelte/store";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 
-export const externalDownloads = writable(new Map());
+export type ExternalDownloadJob = {
+	itemId: string;
+	status?: string;
+	progress?: number;
+	error?: string;
+	[key: string]: unknown;
+};
+
+export const externalDownloads = writable(new Map<string, ExternalDownloadJob>());
 
 let bound = false;
 const eventNames = [
@@ -9,9 +17,9 @@ const eventNames = [
 	"external-download:done",
 	"external-download:error",
 	"external-download:canceled",
-];
+] as const;
 
-function updateJob(job) {
+function updateJob(job: ExternalDownloadJob | null | undefined) {
 	if (!job?.itemId) return;
 
 	externalDownloads.update((current) => {
@@ -23,7 +31,7 @@ function updateJob(job) {
 
 export function bindExternalDownloadEvents() {
 	if (bound) return;
-	if (!globalThis?.window?.runtime?.EventsOn) return;
+	if (!(globalThis as any)?.window?.runtime?.EventsOn) return;
 	bound = true;
 	for (const eventName of eventNames) {
 		EventsOn(eventName, updateJob);
@@ -38,15 +46,18 @@ export function unbindExternalDownloadEvents() {
 	}
 }
 
-export function putExternalDownload(job) {
+export function putExternalDownload(job: ExternalDownloadJob) {
 	updateJob(job);
 }
 
-export function externalJobFor(map, item) {
-	return map?.get?.(item?.id) || null;
+export function externalJobFor(map: Map<string, ExternalDownloadJob> | null | undefined, item: { id?: string } | null | undefined) {
+	return map?.get?.(item?.id || "") || null;
 }
 
-export function mergedDownloadState(map, item) {
+export function mergedDownloadState(
+	map: Map<string, ExternalDownloadJob> | null | undefined,
+	item: { id?: string; downloadStatus?: string; downloadProgress?: number; downloadError?: string } | null | undefined,
+) {
 	const job = externalJobFor(map, item);
 	return {
 		status: job?.status || item?.downloadStatus || "ready",

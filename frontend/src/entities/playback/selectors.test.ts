@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { PlaybackState } from "./model.ts";
 import { getTrackPlaybackUI, isCurrentPlaying, isCurrentTrack } from "./selectors.ts";
 
 test("selectors reflect current track playback", () => {
-	const playback = {
+	const playback: PlaybackState = {
 		status: "playing",
 		currentTrackId: "t1",
 		positionMs: 0,

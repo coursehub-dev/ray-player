@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "./sliderUi.js";
+import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "./sliderUi.ts";
 
 test("slider snapping is relative to min and clamps to bounds", () => {
 	assert.equal(snapSliderValue(11.4, 10, 20, 3), 10);

@@ -1,7 +1,7 @@
 <script lang="ts">
 import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
-import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "../lib/sliderUi.js";
+import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "../lib/sliderUi";
 
 export let value: number = 1;
 export let min: number = 0;

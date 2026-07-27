@@ -1,39 +1,39 @@
-<script>
+<script lang="ts">
 import { createEventDispatcher, onMount } from "svelte";
 import { CheckCircle2, CircleAlert, LoaderCircle, Stethoscope, Wrench, X } from "@lucide/svelte";
 import { api } from "../shared/api";
 import { createDoctorState, doctorRows, doctorStatusLabel, mergeDoctorPatch } from "../lib/doctorUi";
 
-export let settings = {};
+export let settings: Record<string, any> = {};
 
-const dispatch = createEventDispatcher();
+const dispatch = createEventDispatcher<{ close: void; patch: Record<string, unknown> }>();
 let rows = createDoctorState();
-let localSettings = { ...settings };
+let localSettings: Record<string, any> = { ...settings };
 let generation = 0;
 let repairing = "";
 
-const updateRow = (id, patch) => {
+const updateRow = (id: string, patch: Record<string, unknown>) => {
 	rows = {
 		...rows,
 		[id]: { ...rows[id], ...patch },
 	};
 };
 
-const checkOne = async (id, token = generation) => {
+const checkOne = async (id: string, token = generation) => {
 	updateRow(id, {
 		status: "checking",
 		message: "Проверяем…",
 		repairable: false,
 	});
 	try {
-		const result = await api.doctorCheck(id, localSettings);
+		const result = (await api.doctorCheck(id, localSettings)) as Record<string, any> | null;
 		if (token !== generation) return;
 		updateRow(id, {
 			...result,
 			status: result?.status || "blocked",
 			message: result?.message || "Проверка не вернула результат",
 		});
-	} catch (error) {
+	} catch (error: any) {
 		if (token !== generation) return;
 		updateRow(id, {
 			status: "blocked",
@@ -52,7 +52,7 @@ const runChecks = async () => {
 	}
 };
 
-const repair = async (id) => {
+const repair = async (id: string) => {
 	if (repairing) return;
 	const token = generation;
 	repairing = id;
@@ -62,7 +62,10 @@ const repair = async (id) => {
 		repairable: false,
 	});
 	try {
-		const result = await api.doctorRepair(id, localSettings);
+		const result = (await api.doctorRepair(id, localSettings)) as {
+			patch?: Record<string, unknown>;
+			check?: Record<string, unknown>;
+		} | null;
 		if (token !== generation) return;
 		if (result?.patch) {
 			localSettings = mergeDoctorPatch(localSettings, result.patch);
@@ -77,7 +80,7 @@ const repair = async (id) => {
 			await checkOne("minilm");
 			await checkOne("essentia");
 		}
-	} catch (error) {
+	} catch (error: any) {
 		updateRow(id, {
 			status: "repairable",
 			message: error?.message || String(error),

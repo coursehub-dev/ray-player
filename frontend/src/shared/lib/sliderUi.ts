@@ -1,15 +1,15 @@
-const finiteNumber = (value, fallback) => {
+const finiteNumber = (value: unknown, fallback: number): number => {
 	const number = Number(value);
 	return Number.isFinite(number) ? number : fallback;
 };
 
-export const clampSliderValue = (value, min, max) => {
+export const clampSliderValue = (value: unknown, min: unknown, max: unknown): number => {
 	const lower = finiteNumber(min, 0);
 	const upper = Math.max(lower, finiteNumber(max, lower));
 	return Math.max(lower, Math.min(upper, finiteNumber(value, lower)));
 };
 
-export const snapSliderValue = (value, min, max, step) => {
+export const snapSliderValue = (value: unknown, min: unknown, max: unknown, step: unknown): number => {
 	const lower = finiteNumber(min, 0);
 	const upper = Math.max(lower, finiteNumber(max, lower));
 	const bounded = clampSliderValue(value, lower, upper);
@@ -23,7 +23,19 @@ export const snapSliderValue = (value, min, max, step) => {
 	return Math.round(clampSliderValue(snapped, lower, upper) * 1e12) / 1e12;
 };
 
-export const sliderValueFromKey = ({ key, value, min, max, step }) => {
+export const sliderValueFromKey = ({
+	key,
+	value,
+	min,
+	max,
+	step,
+}: {
+	key: string;
+	value: unknown;
+	min: unknown;
+	max: unknown;
+	step: unknown;
+}): number | null => {
 	const lower = finiteNumber(min, 0);
 	const upper = Math.max(lower, finiteNumber(max, lower));
 	const current = clampSliderValue(value, lower, upper);

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 import { LoaderCircle, Sparkles } from "@lucide/svelte";
 
 export let rows = 7;

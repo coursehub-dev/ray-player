@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 import { createEventDispatcher, tick } from "svelte";
 import { Link, LoaderCircle, X } from "@lucide/svelte";
 
@@ -8,8 +8,8 @@ export let submitting = false;
 export let error = "";
 
 let url = "";
-let urlInput;
-const dispatch = createEventDispatcher();
+let urlInput: HTMLInputElement | undefined;
+const dispatch = createEventDispatcher<{ close: void; submit: { url: string } }>();
 
 $: quality = libraryType === "podcast" ? "128 kbps" : "192 kbps";
 $: targetLabel = libraryType === "podcast" ? "Подкасты" : "Музыка";
