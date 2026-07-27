@@ -3,16 +3,16 @@ import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
 import { clampSliderValue, sliderValueFromKey, snapSliderValue } from "../lib/sliderUi.js";
 
-export let value = 1;
-export let min = 0;
-export let max = 1;
-export let step = 0.01;
-export let label = "";
-export let disabled = false;
-export let showValue = true;
+export let value: number = 1;
+export let min: number = 0;
+export let max: number = 1;
+export let step: number = 0.01;
+export let label: string = "";
+export let disabled: boolean = false;
+export let showValue: boolean = true;
 export let format: "percent" | "raw" = "percent";
-export let id = "";
-export let accentReactive = false;
+export let id: string = "";
+export let accentReactive: boolean = false;
 
 const dispatch = createEventDispatcher<{
 	input: number;

@@ -12,8 +12,7 @@
 		"skipLibCheck": true,
 		"noEmit": true,
 		"allowJs": true,
-		"checkJs": false,
-		"types": ["svelte"]
+		"checkJs": false
 	},
 	"include": ["src/**/*.js", "src/**/*.ts", "src/**/*.svelte"],
 	"exclude": ["node_modules", "dist", "wailsjs"]

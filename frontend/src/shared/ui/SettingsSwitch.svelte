@@ -2,10 +2,10 @@
 import clsx from "clsx";
 import { createEventDispatcher } from "svelte";
 
-export let checked = false;
-export let disabled = false;
-export let title = "";
-export let description = "";
+export let checked: boolean = false;
+export let disabled: boolean = false;
+export let title: string = "";
+export let description: string = "";
 
 const dispatch = createEventDispatcher<{
 	change: { checked: boolean };

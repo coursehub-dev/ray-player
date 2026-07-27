@@ -1,11 +1,11 @@
 <script lang="ts">
 import clsx from "clsx";
 
-export let primary = false;
-export let compact = false;
-export let disabled = false;
+export let primary: boolean = false;
+export let compact: boolean = false;
+export let disabled: boolean = false;
 export let type: "button" | "submit" | "reset" = "button";
-export let className = "";
+export let className: string = "";
 </script>
 
 <button
