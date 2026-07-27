@@ -23,6 +23,7 @@ import RayBuildSkeleton from "./components/RayBuildSkeleton.svelte";
 import PodcastProgressBar from "./components/PodcastProgressBar.svelte";
 import AddLinkModal from "./components/AddLinkModal.svelte";
 import DoctorModal from "./components/DoctorModal.svelte";
+import { PlayerBar } from "./widgets/player-bar";
 import { api } from "./lib/api";
 import { isPodcastItemId } from "./lib/mediaIdentity";
 import { hasPlaybackSelection, resolvePlayerTitle, resolveVisualMode } from "./lib/playerUi";
@@ -34,13 +35,6 @@ import {
 	Play,
 	Pause,
 	LoaderCircle,
-	SkipForward,
-	SkipBack,
-	Volume,
-	Volume1,
-	Volume2,
-	VolumeX,
-	Repeat,
 	FolderPlus,
 	FilePlus2,
 	Sparkles,
@@ -2458,100 +2452,35 @@ $: playerSubline = playingPodcast
         {/if}
     </main>
 
-    <footer class="player">
-        <div class="player-inner">
-            <div class="player-now">
-                <div class="cover"></div>
-                <div class="meta">
-                    <strong>{playerTitle}</strong>
-                    {#if !playingPodcast && currentTrackMeta}
-                        <TrackMetaLine
-                            track={currentTrackMeta}
-                            maxGenres={2}
-                            showBpm={true}
-                        />
-                    {:else}
-                        <span>{playerArtist || playerSubline}</span>
-                    {/if}
-                    {#if !playingPodcast && playback.currentGenre}
-                        <small>{playback.currentGenre}</small>
-                    {/if}
-                    {#if playback.status === "error" && playback.lastError}
-                        <small class="player-error">
-                            {playback.lastError}
-                        </small>
-                    {/if}
-                    {#if playerEmoFlowReason &&
-                    playback.status !== "error"}
-                        <small
-                            class="player-emoflow"
-                            title={playerEmoFlowReason}
-                        >
-                            {playerEmoFlowReason}
-                        </small>
-                    {/if}
-                </div>
-            </div>
-
-            <div class="transport">
-                <div class="controls"><IconButton className={`control-btn ${settingsPayload.repeatRay ? "active accent-reactive" : ""}`} title="Repeat ray" on:click={toggleRepeatRay}><Repeat size={18} strokeWidth={1.8} /></IconButton>
-                    <IconButton className="control-btn" title="Previous" disabled={!playbackSelection} on:click={playPrevious}><SkipBack size={18} strokeWidth={1.8} /></IconButton>
-                    <UIButton
-                        primary
-                        className={`play-btn ${
-                            playback.status === "loading"
-                                ? "loading"
-                                : ""
-                        }`}
-                         disabled={!playbackSelection}
-                         on:click={togglePause}
-                    >
-                        {#if playback.status === "loading"}
-                            <LoaderCircle
-                                size={18}
-                                strokeWidth={2}
-                            />
-                        {:else if playback.status === "playing"}
-                            <Pause size={18} strokeWidth={2} />
-                        {:else}
-                            <Play size={18} strokeWidth={2} />
-                        {/if}
-                    </UIButton>
-                    <IconButton className="control-btn" title="Next" disabled={!playbackSelection} on:click={playNext}><SkipForward size={18} strokeWidth={1.8} /></IconButton>
-                </div>
-                <div class="seek">
-                    <span>{currentTrack.positionLabel || "0:00"}</span>
-                    <UISlider value={seekValue / 100} min={0} max={1} step={0.01} showValue={false} disabled={!playbackSelection} accentReactive={$indexingState.isIndexing} on:preview={(e) => previewSeek(e.detail)} on:commit={(e) => commitSeek(e.detail)} />
-                    <span>{currentTrack.durationLabel || "0:00"}</span>
-                </div>
-            </div>
-
-            <div class="player-side">
-                <button
-                    type="button"
-                    class="volume-icon-button"
-                    class:muted={volumeIconLevel === "muted"}
-                    aria-label={volumeIconLevel === "muted" ? "Включить звук" : "Выключить звук"}
-                    title={volumeIconLevel === "muted" ? "Включить звук" : "Выключить звук"}
-                    disabled={volumeMuteBusy}
-                    on:click={togglePlayerMute}
-                >
-                    {#if volumeIconLevel === "muted"}
-                        <VolumeX size={16} strokeWidth={1.8} />
-                    {:else if volumeIconLevel === "low"}
-                        <Volume size={16} strokeWidth={1.8} />
-                    {:else if volumeIconLevel === "medium"}
-                        <Volume1 size={16} strokeWidth={1.8} />
-                    {:else}
-                        <Volume2 size={16} strokeWidth={1.8} />
-                    {/if}
-                </button>
-                <div class="volume-range">
-                    <UISlider value={displayedVolume} min={0} max={1} step={0.01} showValue={false} accentReactive={$indexingState.isIndexing} on:preview={(e) => setPlayerVolume(e.detail)} on:commit={(e) => commitVolume(e.detail)} />
-                </div>
-            </div>
-        </div>
-    </footer>
+    <PlayerBar
+        {playerTitle}
+        {playingPodcast}
+        {currentTrackMeta}
+        {playerArtist}
+        {playerSubline}
+        playbackStatus={playback.status}
+        playbackLastError={playback.lastError}
+        playbackCurrentGenre={playback.currentGenre || ""}
+        {playerEmoFlowReason}
+        repeatRay={settingsPayload.repeatRay}
+        {playbackSelection}
+        {seekValue}
+        positionLabel={currentTrack.positionLabel || "0:00"}
+        durationLabel={currentTrack.durationLabel || "0:00"}
+        {volumeIconLevel}
+        {volumeMuteBusy}
+        {displayedVolume}
+        accentReactive={$indexingState.isIndexing}
+        on:repeat={toggleRepeatRay}
+        on:previous={playPrevious}
+        on:togglePause={togglePause}
+        on:next={playNext}
+        on:seekPreview={(e) => previewSeek(e.detail)}
+        on:seekCommit={(e) => commitSeek(e.detail)}
+        on:mute={togglePlayerMute}
+        on:volumePreview={(e) => setPlayerVolume(e.detail)}
+        on:volumeCommit={(e) => commitVolume(e.detail)}
+    />
 </div>
 
 {#if contextMenu}
