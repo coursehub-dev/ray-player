@@ -16,14 +16,14 @@ import {
 	unbindSnapshotEvents,
 } from "./stores/app";
 import { cssVariables, emoFlowState, syncEmoFlowFromPayload } from "./stores/emoflow";
-import { IconButton, UIButton, UISlider, SettingsSwitch } from "./shared/ui";
-import TrackMetaLine from "./components/TrackMetaLine.svelte";
-import RayTrackRow from "./components/RayTrackRow.svelte";
-import RayBuildSkeleton from "./components/RayBuildSkeleton.svelte";
-import PodcastProgressBar from "./components/PodcastProgressBar.svelte";
+import { UISlider, SettingsSwitch } from "./shared/ui";
 import AddLinkModal from "./components/AddLinkModal.svelte";
 import DoctorModal from "./components/DoctorModal.svelte";
 import { PlayerBar } from "./widgets/player-bar";
+import { SearchPage } from "./pages/search";
+import { HistoryPage } from "./pages/history";
+import { RayPage } from "./pages/ray";
+import { RaysPage } from "./pages/rays";
 import { getTrackPlaybackUI } from "./entities/playback";
 import {
 	applyPlaybackPatch,
@@ -41,21 +41,12 @@ import { externalDownloads, putExternalDownload, mergedDownloadState } from "./s
 import {
 	Search,
 	History,
-	Settings,
-	Play,
-	Pause,
-	LoaderCircle,
 	FolderPlus,
 	FilePlus2,
-	Sparkles,
 	ListMusic,
 	X,
 	Mic,
 	Music2,
-	CheckCircle2,
-	FileText,
-	GripVertical,
-	Trash2,
 	Link,
 	Stethoscope,
 } from "@lucide/svelte";
@@ -1567,823 +1558,112 @@ $: playerSubline = playingPodcast
 
     <main class="content">
         {#if currentScreen === "search"}
-            <section class="screen active">
-                <div class="screen-head">
-                    <div>
-                        <h1>{libraryMode === "podcast" ? "Подкасты" : "Поиск"}</h1>
-                        {#if libraryMode === "podcast"}
-                            <p>
-                                Отдельная библиотека выпусков с папками,
-                                сериями и памятью прогресса.
-                            </p>
-                        {:else}
-                            <p>
-                                Поиск по локальной библиотеке. Имя файла, теги,
-                                артист, альбом. Клик запускает трек и базовый луч.
-                            </p>
-                        {/if}
-                    </div>
-                    <div class="top-right-status">
-                        <div class:accent-reactive={$indexingState.isIndexing} class="library-status">
-                            {libraryMode === "podcast"
-                                ? `${(appState.podcasts || []).length} episodes`
-                                : $indexingState.isIndexing && $indexingState.total > 0
-                                  ? `${$indexingState.processed}/${$indexingState.total}`
-                                  : `${$indexingState.libraryCount || appState.libraryStat?.tracks || 0} tracks`}
-                        </div>
-                        <IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton>
-                    </div>
-                </div>
-                <div class="screen-body search-layout">
-                    <div class="hero">
-                        <div class="hero-top">
-                            <span class="pulse"></span>
-                            <span>{libraryMode === "podcast" ? "PodcastFlow · смысловой маршрут" : `EmoFlow UI · ${emoFlowDirectionLabel}`}</span>
-                        </div>
-                        <h2>
-                            {libraryMode === "podcast"
-                                ? "Продолжи тему. Не потеряй место."
-                                : "Найди трек. Запусти луч."}
-                        </h2>
-                        <p>
-                            {libraryMode === "podcast"
-                                ? "Ищи по названию, автору, серии и папке. Недослушанные выпуски поднимаются выше."
-                                : "Минимум визуального шума. Поиск, запуск и умные локальные рекомендации — всё остальное уходит под капот."}
-                            {#if libraryMode === "music" && emoFlowSummary}
-                                <span class="emoflow-copy">Сейчас: {emoFlowSummary}.</span>
-                            {/if}
-                        </p>
-                        <div class="hero-ambient" aria-hidden="true"></div>
-                    </div>
-                    <div class="search-input-wrap">
-                        <span class="search-mark"><Search size={18} strokeWidth={1.8} /></span>
-                        <input
-                            bind:this={searchInputEl}
-                            class="search-input"
-                            bind:value={query}
-                            placeholder={libraryMode === "podcast" ? "Искать выпуск, автора, серию или папку" : "Искать в локальной библиотеке"}
-                            on:input={(e) => searchCurrentLibrary(e.currentTarget.value)}
-                        />
-                        <span class="kbd">⌘ / Ctrl + K</span>
-                    </div>
-
-                    {#if libraryEmpty}
-                        <div class="empty-state">
-                            <strong>Библиотека пока пустая</strong>
-                            <span
-                                >Добавь {libraryMode === "podcast" ? "папку с подкастами или отдельные выпуски" : "папку или отдельные аудиофайлы"} слева.</span
-                            >
-                        </div>
-                    {:else if libraryMode === "podcast"}
-                        <div class="list podcast-list">
-                            {#each podcastResults as item}
-                                <button
-                                    type="button"
-                                    class:completed={item.isCompleted}
-                                    class:current={item.id === $playbackState.currentTrackId}
-                                    class:external-pending={!externalPlayable(item)}
-                                    disabled={!externalPlayable(item)}
-                                    class="row action-row podcast-row"
-                                    on:click={() =>
-                                        togglePodcastRow(item.id, false)}
-                                >
-                                    <div class="podcast-icon">
-                                        {#if item.id === $playbackState.currentTrackId && $playbackState.status === "playing"}
-                                            <Pause size={20} strokeWidth={1.8} />
-                                        {:else}
-                                            <Play size={20} strokeWidth={1.8} />
-                                        {/if}
-                                    </div>
-                                    <div class="meta">
-                                        <strong>{item.title}</strong>
-                                        <span class="podcast-meta">
-                                            {podcastMeta(item) || "Локальный выпуск"}
-                                        </span>
-                                        <span class="podcast-progress-label">
-                                            {#if item.isCompleted}
-                                                Прослушано
-                                            {:else if podcastProgressPercent(item) > 0}
-                                                Прослушано {podcastProgressPercent(item)}% · продолжить с {Math.floor(item.resumePosition / 60)}:{String(Math.floor(item.resumePosition % 60)).padStart(2, "0")}
-                                            {:else}
-                                                Новый выпуск
-                                            {/if}
-                                        </span>
-                                        {#if item.sourceType === "yt_dlp" && externalStatusLabel(item)}
-                                            <span class="external-download-label">
-                                                {externalStatusLabel(item)}
-                                            </span>
-                                        {/if}
-                                    </div>
-                                    <div class="tail tail-stack">
-                                        <span>
-                                            {item.durationLabel || "—"}
-                                        </span>
-                                        <span
-                                            class="semantic-status"
-                                            title="Полная semantic-индексация по MiniLM будет добавлена отдельным worker"
-                                        >
-                                            {#if item.semanticStatus === "done"}
-                                                <CheckCircle2 size={12} />
-                                                Индекс готов
-                                            {:else if item.semanticStatus === "failed"}
-                                                Ошибка индекса
-                                            {:else}
-                                                <FileText size={12} />
-                                                Метаданные готовы
-                                            {/if}
-                                        </span>
-                                    </div>
-
-                                    <PodcastProgressBar
-                                        {item}
-                                        className="podcast-row-progress"
-                                    />
-                                    {#if item.sourceType === "yt_dlp" && !externalPlayable(item)}
-                                        <span class="external-download-progress">
-                                            <span style={`width:${Math.round(externalState(item).progress * 100)}%`}></span>
-                                        </span>
-                                    {/if}
-                                </button>
-                            {/each}
-                        </div>
-                    {:else}
-                        <div class="list">
-                            {#each visibleResults as row}
-                                <button
-                                    class:itemCurrent={rowCurrent(row.track.id)}
-                                    class:external-pending={!externalPlayable(row.track)}
-                                    disabled={!externalPlayable(row.track)}
-                                    class="row action-row track-row"
-                                    on:click={() =>
-                                        playOrToggle(row.track.id, "ray")}
-                                    on:contextmenu={(event) =>
-                                        openTrackMenu(
-                                            event,
-                                            row.track.id,
-                                            "search",
-                                        )}
-                                >
-                                    <div class="cover-wrapper">
-                                        <div class="cover"></div>
-                                        <div class="cover-play-indicator">
-                                            <span
-                                                class:icon-playing={rowCurrent(
-                                                    row.track.id,
-                                                )}
-                                            >
-                                                {#if rowIsBuildingRay(row.track.id)}
-                                                    <LoaderCircle size={15} />
-                                                {:else}
-                                                    {rowIcon(row.track.id)}
-                                                {/if}
-                                            </span>
-                                            {#if rowRaySeed(row.track.id)}
-                                                <Sparkles
-                                                    class="ray-seed-icon"
-                                                    size={14}
-                                                    title="Seed track for current ray"
-                                                />
-                                            {/if}
-                                        </div>
-                                    </div>
-                                    <div class="meta">
-                                        <strong
-                                            >{row.track.title ||
-                                                row.track.fileName}</strong
-                                        >
-                                        <TrackMetaLine
-                                            track={row.track}
-                                            maxGenres={2}
-                                            showBpm={true}
-                                        />
-                                        {#if row.track.sourceType === "yt_dlp" && externalStatusLabel(row.track)}
-                                            <span class="external-download-label">
-                                                {externalStatusLabel(row.track)}
-                                            </span>
-                                        {/if}
-                                        {#if genreBadge(row.track)}<div
-                                                class="badges"
-                                            >
-                                                <i class="badge genre"
-                                                    >{genreBadge(row.track)}</i
-                                                >
-                                            </div>{/if}
-                                    </div>
-                                    <div class="tail tail-stack">
-                                        <span>{row.track.durationLabel}</span>
-                                    </div>
-                                    {#if row.track.sourceType === "yt_dlp" && !externalPlayable(row.track)}
-                                        <span class="external-download-progress">
-                                            <span style={`width:${Math.round(externalState(row.track).progress * 100)}%`}></span>
-                                        </span>
-                                    {/if}
-                                    <span class="track-menu-wrap">
-                                        <span
-                                            class="track-menu-btn"
-                                            role="button"
-                                            tabindex="0"
-                                            aria-label="Меню трека"
-                                            on:click={(event) =>
-                                                openTrackMenu(
-                                                    event,
-                                                    row.track.id,
-                                                    "search",
-                                                )}
-                                            on:keydown={(event) =>
-                                                (event.key === "Enter" ||
-                                                    event.key === " ") &&
-                                                openTrackMenu(
-                                                    event,
-                                                    row.track.id,
-                                                    "search",
-                                                )}>⋯</span
-                                        >
-                                    </span>
-                                </button>
-                            {/each}
-                        </div>
-                    {/if}
-                </div>
-            </section>
+            <SearchPage
+                {libraryMode}
+                {appState}
+                playback={$playbackState}
+                indexing={$indexingState}
+                bind:query
+                bind:searchInputEl
+                {libraryEmpty}
+                {podcastResults}
+                {visibleResults}
+                {emoFlowDirectionLabel}
+                {emoFlowSummary}
+                {openSettings}
+                {searchCurrentLibrary}
+                {togglePodcastRow}
+                {playOrToggle}
+                {openTrackMenu}
+                {externalPlayable}
+                {externalStatusLabel}
+                {externalState}
+                {podcastMeta}
+                {podcastProgressPercent}
+                {rowCurrent}
+                {rowIsBuildingRay}
+                {rowIcon}
+                {rowRaySeed}
+                {genreBadge}
+            />
         {/if}
 
         {#if currentScreen === "history"}
-            <section class="screen active">
-                <div class="screen-head">
-                    <div>
-                        <h1>{libraryMode === "podcast" ? "История подкастов" : "История"}</h1>
-                        <p>{libraryMode === "podcast" ? "Независимая история прослушивания выпусков, прогресса и источников запуска." : "Что слушали, где остановились, и сколько уже прослушано."}</p>
-                    </div>
-                    <div class="top-right-status"><div class:accent-reactive={$indexingState.isIndexing} class="library-status">{$indexingState.isIndexing && $indexingState.total > 0 ? `${$indexingState.processed}/${$indexingState.total}` : `${$indexingState.libraryCount || appState.libraryStat?.tracks || 0} tracks`}</div><IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton></div>
-                </div>
-                <div class="screen-body">
-                    {#if libraryMode === "podcast"}
-                        <div class="list podcast-history-list">
-                            {#if (appState.podcastHistory || []).length}
-                                {#each appState.podcastHistory as entry}
-                                    <button type="button" class="row action-row podcast-history-row" class:current={entry.item.id === $playbackState.currentTrackId} on:click={() => playPodcastHistoryItem(entry)}>
-                                        <div class="podcast-history-icon">{#if entry.item.id === $playbackState.currentTrackId && $playbackState.status === "playing"}<Pause size={19} strokeWidth={1.8} />{:else}<Play size={19} strokeWidth={1.8} />{/if}</div>
-                                        <div class="meta">
-                                            <strong>{entry.item.title}</strong>
-                                            <span>{podcastMeta(entry.item) || "Локальный выпуск"}</span>
-                                            <small class="podcast-history-state">{entry.playedAtLabel} · {podcastHistorySourceLabel(entry.source)}{#if entry.listenedLabel} · прослушано {entry.listenedLabel}{/if}{#if entry.positionLabel} · остановка {entry.positionLabel}{/if}</small>
-                                        </div>
-                                        <div class="tail tail-stack">
-                                            <span>{entry.progressPercent}%</span>
-                                            {#if entry.rayId}
-                                                <span class="history-ray-link">Луч</span>
-                                            {/if}
-                                        </div>
-                                        <span class="podcast-history-progress"><span style={`width:${entry.progressPercent}%`}></span></span>
-                                    </button>
-                                {/each}
-                            {:else}
-                                <div class="empty-state">
-                                    <strong>История подкастов пуста</strong>
-                                    <span>Запустите выпуск из библиотеки или подкастового луча.</span>
-                                </div>
-                            {/if}
-                        </div>
-                    {:else}
-                    <div class="list">
-                        {#if appState.history?.length}
-                            {#each appState.history as item}
-                                <button
-                                    class:itemCurrent={rowCurrent(
-                                        item.track.id,
-                                    )}
-                                    class="row action-row track-row"
-                                    on:click={() =>
-                                        playOrToggle(item.track.id, "ray")}
-                                    on:contextmenu={(event) =>
-                                        openTrackMenu(
-                                            event,
-                                            item.track.id,
-                                            "history",
-                                        )}
-                                >
-                                    <div class="cover-wrapper">
-                                        <div class="cover"></div>
-                                        <div class="cover-play-indicator">
-                                            <span
-                                                class:icon-playing={rowCurrent(
-                                                    item.track.id,
-                                                )}
-                                            >
-                                                {rowIcon(item.track.id)}
-                                            </span>
-                                            {#if rowRaySeed(item.track.id)}
-                                                <Sparkles
-                                                    class="ray-seed-icon"
-                                                    size={14}
-                                                    title="Seed track for current ray"
-                                                />
-                                            {/if}
-                                        </div>
-                                    </div>
-                                    <div class="meta">
-                                        <strong>{item.track.title}</strong>
-                                        <TrackMetaLine
-                                            track={item.track}
-                                            maxGenres={2}
-                                            showBpm={true}
-                                        />
-                                        <small class="history-track-state">
-                                            {item.playedAtLabel} ·
-                                            {item.progressLabel} из
-                                            {item.track.durationLabel}
-                                        </small>
-                                        <div
-                                            class="progress"
-                                            style="margin-top: 6px;"
-                                        >
-                                            <i
-                                                style={`--w:${Math.round((item.progress ?? 0.4) * 100)}%`}
-                                            ></i>
-                                        </div>
-                                    </div>
-                                    <div class="tail">
-                                        {item.track.durationLabel}
-                                    </div>
-                                    <span class="track-menu-wrap">
-                                        <span
-                                            class="track-menu-btn"
-                                            role="button"
-                                            tabindex="0"
-                                            aria-label="Меню трека"
-                                            on:click={(event) =>
-                                                openTrackMenu(
-                                                    event,
-                                                    item.track.id,
-                                                    "history",
-                                                )}
-                                            on:keydown={(event) =>
-                                                (event.key === "Enter" ||
-                                                    event.key === " ") &&
-                                                openTrackMenu(
-                                                    event,
-                                                    item.track.id,
-                                                    "history",
-                                                )}>⋯</span
-                                        >
-                                    </span>
-                                </button>
-                            {/each}
-                        {:else}
-                            <div class="empty-state">
-                                <strong>История пуста</strong><span
-                                    >Запусти трек из поиска — он появится здесь.</span
-                                >
-                            </div>
-                        {/if}
-                    </div>
-                    {/if}
-                </div>
-            </section>
-        {/if}
-
-        {#if currentScreen === "ray" && libraryMode === "podcast"}
-            <section class="screen active podcast-ray-screen">
-                <div class="screen-head">
-                    <div>
-                        <h1>Луч подкастов</h1>
-                        <p>
-                            {#if appState.podcastRay?.folderScope}
-                                Приоритет текущей папки:
-                                {appState.podcastRay.folderScope}
-                            {:else}
-                                Запустите выпуск, чтобы построить смысловой маршрут.
-                            {/if}
-                        </p>
-                    </div>
-                    <div class="top-right-status"><div class="library-status">{(appState.podcastRay?.items || []).length} episodes</div><IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton></div>
-                </div>
-
-                <div class="screen-body">
-                    {#if !(appState.podcastRay?.items || []).length}
-                        <div class="empty-state">
-                            <strong>Луч ещё не построен</strong>
-                            <span>
-                                Выберите подкаст в библиотеке. Сначала будут
-                                добавлены выпуски из той же папки, затем из
-                                соседних папок и серий.
-                            </span>
-                        </div>
-                    {:else}
-                        <div class="podcast-ray-toolbar">
-                            <label>
-                                <span>Наполнение</span>
-                                <select
-                                    value={appState.podcastRay?.contentMode || "recommended"}
-                                    disabled={podcastRayUpdating}
-                                    on:change={(event) =>
-                                        setPodcastContentMode(
-                                            event.currentTarget.value,
-                                        )}
-                                >
-                                    <option value="recommended">
-                                        Рекомендуемое
-                                    </option>
-                                    <option value="explore">
-                                        Исследование
-                                    </option>
-                                    <option value="current_folder">
-                                        Текущая папка
-                                    </option>
-                                </select>
-                            </label>
-
-                            <label>
-                                <span>Сортировка</span>
-                                <select
-                                    value={appState.podcastRay?.sortMode || "recommended"}
-                                    disabled={podcastRayUpdating}
-                                    on:change={(event) =>
-                                        setPodcastSortMode(
-                                            event.currentTarget.value,
-                                        )}
-                                >
-                                    <option value="recommended">Рекомендуемое</option>
-                                    <option value="name_asc">Название A → Z</option>
-                                    <option value="name_desc">Название Z → A</option>
-                                    <option value="date_desc">Сначала новые</option>
-                                    <option value="date_asc">Сначала старые</option>
-                                    <option value="manual">Ручной порядок</option>
-                                </select>
-                            </label>
-
-                            {#if appState.podcastRay?.isManualOrder}
-                                <span class="podcast-manual-badge">
-                                    Ручной порядок
-                                </span>
-                            {/if}
-                        </div>
-
-                        <div class="podcast-ray-list">
-                            {#each appState.podcastRay.items as rayItem}
-                                <button
-                                    type="button"
-                                    class="podcast-ray-row"
-                                    class:current={rayItem.item.id === $playbackState.currentTrackId}
-                                    class:drop-target={podcastRayDropIndex === rayItem.position && draggedPodcastRayIndex !== rayItem.position}
-                                    on:dragover={(event) =>
-                                        overPodcastRayItem(
-                                            event,
-                                            rayItem.position,
-                                        )}
-                                    on:drop={(event) =>
-                                        dropPodcastRayItem(
-                                            event,
-                                            rayItem.position,
-                                        )}
-                                    on:click={() =>
-                                        togglePodcastRow(rayItem.item.id, true)}
-                                >
-                                    <span
-                                        class="podcast-ray-drag"
-                                        draggable="true"
-                                        role="button"
-                                        tabindex="0"
-                                        aria-label="Перетащить"
-                                        title="Перетащить"
-                                        on:click|stopPropagation
-                                        on:keydown={(event) => {
-                                            if (
-                                                event.key === "Enter" ||
-                                                event.key === " "
-                                            ) {
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                            }
-                                        }}
-                                        on:dragstart={(event) =>
-                                            beginPodcastRayDrag(
-                                                event,
-                                                rayItem.position,
-                                            )}
-                                        on:dragend={finishPodcastRayDrag}
-                                    >
-                                        <GripVertical size={15} />
-                                    </span>
-
-                                    <span class="podcast-ray-position">
-                                        {rayItem.position + 1}
-                                    </span>
-
-                                    <span class="podcast-ray-play">
-                                        {#if rayItem.item.id === $playbackState.currentTrackId && $playbackState.status === "playing"}
-                                            <Pause size={16} strokeWidth={2} />
-                                        {:else}
-                                            <Play size={16} strokeWidth={2} />
-                                        {/if}
-                                    </span>
-
-                                    <span class="podcast-ray-copy">
-                                        <strong>{rayItem.item.title}</strong>
-                                        <small>
-                                            {podcastMeta(rayItem.item) ||
-                                                "Локальный выпуск"}
-                                        </small>
-                                        <small class="podcast-ray-reason">
-                                            {rayItem.reason}
-                                        </small>
-                                    </span>
-
-                                    <span class="podcast-ray-tail">
-                                        {#if podcastProgressPercent(rayItem.item) > 0}
-                                            {podcastProgressPercent(rayItem.item)}%
-                                        {:else}
-                                            {rayItem.item.durationLabel}
-                                        {/if}
-                                    </span>
-
-                                    {#if rayItem.item.id !== appState.podcastRay.seedItemId}
-                                        <span
-                                            class="podcast-ray-remove"
-                                            role="button"
-                                            tabindex="0"
-                                            aria-label="Удалить из луча"
-                                            title="Удалить из луча"
-                                            on:click={(event) =>
-                                                removePodcastRayItem(
-                                                    event,
-                                                    rayItem.item.id,
-                                                )}
-                                            on:keydown={(event) => {
-                                                if (
-                                                    event.key === "Enter" ||
-                                                    event.key === " "
-                                                ) {
-                                                    event.preventDefault();
-                                                    removePodcastRayItem(
-                                                        event,
-                                                        rayItem.item.id,
-                                                    );
-                                                }
-                                            }}
-                                        >
-                                            <Trash2 size={14} />
-                                        </span>
-                                    {/if}
-
-                                    <PodcastProgressBar
-                                        item={rayItem.item}
-                                        className="podcast-ray-progress"
-                                    />
-                                </button>
-                            {/each}
-                        </div>
-                    {/if}
-                </div>
-            </section>
+            <HistoryPage
+                {libraryMode}
+                {appState}
+                playback={$playbackState}
+                indexing={$indexingState}
+                {openSettings}
+                {playPodcastHistoryItem}
+                {playOrToggle}
+                {openTrackMenu}
+                {podcastMeta}
+                {podcastHistorySourceLabel}
+                {rowCurrent}
+                {rowIcon}
+                {rowRaySeed}
+            />
         {/if}
 
         {#if currentScreen === "ray"}
-            <section class="screen active">
-                <div class="screen-head">
-                    <div>
-                        <h1>
-                            Луч{currentTrack.currentTitle
-                                ? ` · ${currentTrack.currentTitle}`
-                                : ""}
-                        </h1>
-                        <p>
-                            Текущий луч. Можно ткнуть в любой трек очереди и
-                            сразу перескочить на него.
-                        </p>
-                        <div class="badges" style="margin-top:8px; gap:8px;">
-                            <i class="badge emoflow">{emoFlowDirectionLabel}</i>
-                            {#if emoFlowEmotionLabel}
-                                <span
-                                    class={`badge emotion emotion-${emoFlowEmotionLabel.replaceAll(" ", "-")}`}
-                                >
-                                    {emoFlowEmotionLabel}
-                                </span>
-                            {/if}
-                            <label class="badge genre">mode
-                                <select bind:value={selectedRayMode} style="margin-left:6px; background:transparent; color:inherit; border:none;">
-                                    <option value="">auto</option>
-                                    <option value="continue_mood">continue</option>
-                                    <option value="warm_up">warm_up</option>
-                                    <option value="cool_down">cool_down</option>
-                                    <option value="explore">explore</option>
-                                    <option value="deepen">deepen</option>
-                                </select>
-                            </label>
-                            <UIButton compact className="badge-height" on:click={toggleInsight}>{showInsight ? 'hide insight' : 'show insight'}</UIButton>
-                        </div>
-                    </div>
-                    <div class="top-right-status"><div class:accent-reactive={$indexingState.isIndexing} class="library-status">{$indexingState.isIndexing && $indexingState.total > 0 ? `${$indexingState.processed}/${$indexingState.total}` : `${$indexingState.libraryCount || appState.libraryStat?.tracks || 0} tracks`}</div><IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton></div>
-                </div>
-                <div class="screen-body">
-                    {#if (appState.musicRay?.id || appState.queue?.length)}
-                        <div class="ray-toolbar">
-                            <label>
-                                <span>Траектория</span>
-                                <select
-                                    value={appState.musicRay?.contentMode || "stable"}
-                                    disabled={musicRayUpdating}
-                                    on:change={(event) =>
-                                        setMusicContentMode(
-                                            event.currentTarget.value,
-                                        )}
-                                >
-                                    <option value="stable">Ровный поток</option>
-                                    <option value="warm_up">Разогрев</option>
-                                    <option value="cool_down">Снижение</option>
-                                    <option value="intensify">Интенсивнее</option>
-                                    <option value="deepen">Глубже</option>
-                                    <option value="explore">Исследование</option>
-                                </select>
-                            </label>
-
-                            <label>
-                                <span>Сортировка</span>
-                                <select
-                                    value={appState.musicRay?.sortMode || "recommended"}
-                                    disabled={musicRayUpdating}
-                                    on:change={(event) =>
-                                        setMusicSortMode(
-                                            event.currentTarget.value,
-                                        )}
-                                >
-                                    <option value="recommended">Рекомендуемое</option>
-                                    <option value="name_asc">Название A → Z</option>
-                                    <option value="name_desc">Название Z → A</option>
-                                    <option value="date_desc">Сначала новые</option>
-                                    <option value="date_asc">Сначала старые</option>
-                                    <option value="manual">Ручной порядок</option>
-                                </select>
-                            </label>
-
-                            {#if appState.musicRay?.isManualOrder}
-                                <span class="ray-manual-badge">
-                                    Ручной порядок
-                                </span>
-                            {/if}
-                        </div>
-                    {/if}
-
-                    <div class="playlist">
-                        {#if isRayBuilding}
-                            <RayBuildSkeleton
-                                seedTitle={trackById(
-                                    rayBuild.seedTrackId,
-                                )?.title || $playbackState.currentTitle}
-                            />
-                        {:else if appState.queue?.length}
-                            {#each appState.queue as item, index}
-                                <div
-                                    class:rowPast={currentQueueIndex >= 0 &&
-                                        index < currentQueueIndex}
-                                    class:rowFuture={currentQueueIndex >= 0 &&
-                                        index > currentQueueIndex}
-                                >
-                                    <RayTrackRow
-                                        {item}
-                                        {index}
-                                        playback={$playbackState}
-                                        {showInsight}
-                                        dropTarget={musicRayDropIndex === index &&
-                                            draggedMusicRayIndex !== index}
-                                        dragging={draggedMusicRayIndex === index}
-                                        insightLine={playlistInsightLine(
-                                            item,
-                                            index,
-                                        )}
-                                        debugLine={trackDebugLine(item)}
-                                        on:dragstart={(event) =>
-                                            beginMusicRayDrag(
-                                                event.detail.event,
-                                                event.detail.item,
-                                                event.detail.index,
-                                            )}
-                                        on:dragover={(event) =>
-                                            overMusicRayItem(
-                                                event.detail.event,
-                                                event.detail.index,
-                                            )}
-                                        on:drop={(event) =>
-                                            dropMusicRayItem(
-                                                event.detail.event,
-                                                event.detail.index,
-                                            )}
-                                        on:dragend={finishMusicRayDrag}
-                                        on:play={(event) =>
-                                            playTrackFromQueue(
-                                                event.detail.trackId,
-                                            )}
-                                        on:menu={(event) =>
-                                            openTrackMenu(
-                                                event.detail.event,
-                                                event.detail.trackId,
-                                                "ray",
-                                            )}
-                                    />
-                                </div>
-                            {/each}
-                        {:else}
-                            <div class="empty-state">
-                                <strong>Луч ещё не запущен</strong><span
-                                    >Выбери трек в поиске — он станет seed для
-                                    базового луча.</span
-                                >
-                            </div>
-                        {/if}
-                        {#if showInsight && auditRows.length}
-                            <div class="settings-block" style="margin-top:16px;">
-                                <div class="small-head">Ray audit</div>
-                                {#each auditRows as row}
-                                    <div class="probe-row probe-row-tight">
-                                        <strong>{row.position}. {row.title}</strong>
-                                        <span>{row.reason}</span>
-                                        <small>sim {row.insight?.similarity?.toFixed?.(2) || '0.00'} · dist {row.insight?.moodDistance?.toFixed?.(2) || '0.00'} · jump {row.insight?.jumpPenalty?.toFixed?.(2) || '0.00'} · Δe {row.insight?.energyDelta?.toFixed?.(2) || '0.00'} · tempo {row.insight?.tempoCompatibility?.toFixed?.(2) || '0.00'}</small>
-                                    </div>
-                                {/each}
-                            </div>
-                        {/if}
-                    </div>
-                </div>
-            </section>
+            <RayPage
+                {libraryMode}
+                {appState}
+                playback={$playbackState}
+                indexing={$indexingState}
+                {currentTrack}
+                {rayBuild}
+                bind:selectedRayMode
+                {showInsight}
+                {auditRows}
+                {emoFlowDirectionLabel}
+                {emoFlowEmotionLabel}
+                {isRayBuilding}
+                {currentQueueIndex}
+                {podcastRayUpdating}
+                {podcastRayDropIndex}
+                {draggedPodcastRayIndex}
+                {musicRayUpdating}
+                {musicRayDropIndex}
+                {draggedMusicRayIndex}
+                {openSettings}
+                {toggleInsight}
+                {setPodcastContentMode}
+                {setPodcastSortMode}
+                {setMusicContentMode}
+                {setMusicSortMode}
+                {overPodcastRayItem}
+                {dropPodcastRayItem}
+                {beginPodcastRayDrag}
+                {finishPodcastRayDrag}
+                {togglePodcastRow}
+                {removePodcastRayItem}
+                {podcastMeta}
+                {podcastProgressPercent}
+                {trackById}
+                {playlistInsightLine}
+                {trackDebugLine}
+                {beginMusicRayDrag}
+                {overMusicRayItem}
+                {dropMusicRayItem}
+                {finishMusicRayDrag}
+                {playTrackFromQueue}
+                {openTrackMenu}
+            />
         {/if}
 
         {#if currentScreen === "rays"}
-            <section class="screen active">
-                <div class="screen-head">
-                    <div>
-                        <h1>{libraryMode === "podcast" ? "История подкастовых лучей" : "История лучей"}</h1>
-                        <p>{libraryMode === "podcast" ? "Сохранённые смысловые маршруты, их режимы наполнения и ручной порядок." : "Ранее собранные лучи. Нажатие активирует луч и возвращает к нему с сохранением позиции."}</p>
-                    </div>
-                    <div class="top-right-status"><div class:accent-reactive={$indexingState.isIndexing} class="library-status">{$indexingState.isIndexing && $indexingState.total > 0 ? `${$indexingState.processed}/${$indexingState.total}` : `${$indexingState.libraryCount || appState.libraryStat?.tracks || 0} tracks`}</div><IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton></div>
-                </div>
-                <div class="screen-body">
-                    {#if libraryMode === "podcast"}
-                        <div class="podcast-ray-history-list">
-                            {#if (appState.podcastRays || []).length}
-                                {#each appState.podcastRays as ray}
-                                    <button type="button" class="podcast-ray-history-row" class:current={ray.id === appState.podcastRay?.id} on:click={() => openPodcastRayHistory(ray.id)}>
-                                        <span class="podcast-ray-history-icon"><Mic size={19} strokeWidth={1.6} /></span>
-                                        <span class="podcast-ray-history-copy">
-                                            <strong>{ray.title || ray.seed.title}</strong>
-                                            <small>{ray.seed.series || ray.seed.author || ray.folderScope || "Подкастовый луч"}</small>
-                                            <span class="podcast-ray-history-badges">
-                                                <i>{podcastRayContentLabel(ray.contentMode)}</i>
-                                                <i>{podcastRaySortLabel(ray.sortMode)}</i>
-                                                {#if ray.isManualOrder}
-                                                    <i>Ручной порядок</i>
-                                                {/if}
-                                                {#if ray.parentRayId}
-                                                    <i>Версия {ray.revision}</i>
-                                                {/if}
-                                            </span>
-                                        </span>
-                                        <span class="podcast-ray-history-tail">
-                                            <strong>{ray.itemCount}</strong>
-                                            <small>выпусков</small>
-                                            <small>{ray.createdAtLabel}</small>
-                                        </span>
-                                    </button>
-                                {/each}
-                            {:else}
-                                <div class="empty-state">
-                                    <strong>История подкастовых лучей пуста</strong>
-                                    <span>Запустите подкаст, чтобы построить первый смысловой маршрут.</span>
-                                </div>
-                            {/if}
-                        </div>
-                    {:else}
-                    <div class="ray-archive">
-                        {#if appState.rays?.length}
-                            {#each appState.rays as ray}
-                                <button
-                                    class:active={ray.active}
-                                    class="ray-card"
-                                    on:click={() => resumeRay(ray.id)}
-                                >
-                                    <div>
-                                        <strong>{ray.name}</strong>
-                                        <span
-                                            >{ray.trackCount} треков · остановлено
-                                            на {ray.currentTrackName} · {ray.resumeLabel}</span
-                                        >
-                                    </div>
-                                    <div class="ray-status">
-                                        {ray.active ? "текущий" : "архив"}
-                                    </div>
-                                </button>
-                            {/each}
-                        {:else}
-                            <div class="empty-state">
-                                <strong>История лучей пуста</strong><span
-                                    >После первого запуска трека здесь появится
-                                    сохранённый луч.</span
-                                >
-                            </div>
-                        {/if}
-                    </div>
-                    {/if}
-                </div>
-            </section>
+            <RaysPage
+                {libraryMode}
+                {appState}
+                indexing={$indexingState}
+                {openSettings}
+                {openPodcastRayHistory}
+                {resumeRay}
+                {podcastRayContentLabel}
+                {podcastRaySortLabel}
+            />
         {/if}
     </main>
 
