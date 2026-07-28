@@ -239,6 +239,7 @@ const (
 	TrajectoryContinueMood RayTrajectoryMode = "continue_mood"
 	TrajectoryWarmUp       RayTrajectoryMode = "warm_up"
 	TrajectoryCoolDown     RayTrajectoryMode = "cool_down"
+	TrajectoryIntensify    RayTrajectoryMode = "intensify"
 	TrajectoryExplore      RayTrajectoryMode = "explore"
 	TrajectoryDeepen       RayTrajectoryMode = "deepen"
 )
@@ -316,6 +317,8 @@ func weightsForMode(mode RayTrajectoryMode) modeWeights {
 	switch mode {
 	case TrajectoryWarmUp:
 		return modeWeights{Base: 0.36, Flow: 0.36, Quota: 0.08, Transition: 0.06, Novelty: 0.04, Repeat: 0.10, Jump: 0.16, Skip: 0.14, Volatility: 0.10}
+	case TrajectoryIntensify:
+		return modeWeights{Base: 0.34, Flow: 0.42, Quota: 0.08, Transition: 0.07, Novelty: 0.02, Repeat: 0.10, Jump: 0.18, Skip: 0.15, Volatility: 0.12}
 	case TrajectoryCoolDown:
 		return modeWeights{Base: 0.34, Flow: 0.38, Quota: 0.08, Transition: 0.06, Novelty: 0.03, Repeat: 0.10, Jump: 0.20, Skip: 0.15, Volatility: 0.14}
 	case TrajectoryExplore:
@@ -663,6 +666,9 @@ func canPlaceDiscovery(queue []rays.QueueItem, candidate scored, mode RayTraject
 		maxWildcard = 1
 	case TrajectoryWarmUp:
 		maxDiscovery = 2
+		maxWildcard = 0
+	case TrajectoryIntensify:
+		maxDiscovery = 1
 		maxWildcard = 0
 	case TrajectoryCoolDown:
 		maxDiscovery = 1
@@ -2443,6 +2449,20 @@ func chooseNextCandidateContext(
 				modePenalty += 0.10
 			}
 		}
+		if mode == TrajectoryIntensify {
+			energyDelta := item.track.Energy - prev.Energy
+			aggressionDelta := item.track.Aggressive - prev.Aggressive
+			pressureDelta := item.track.Heaviness - prev.Heaviness
+			if energyDelta < 0.02 {
+				modePenalty += 0.22
+			}
+			if aggressionDelta < -0.04 && pressureDelta < 0.02 {
+				modePenalty += 0.18
+			}
+			if item.track.Relaxed > prev.Relaxed+0.12 {
+				modePenalty += 0.12
+			}
+		}
 		if mode == TrajectoryCoolDown {
 			energyDelta := item.track.Energy - prev.Energy
 			if energyDelta > 0.10 {
@@ -2660,10 +2680,10 @@ func normalizeRayMode(requested string, fallback RayTrajectoryMode) RayTrajector
 	case rays.ContentStable:
 		return TrajectoryContinueMood
 	case rays.ContentIntensify:
-		return TrajectoryWarmUp
+		return TrajectoryIntensify
 	}
 	switch RayTrajectoryMode(requested) {
-	case TrajectoryContinueMood, TrajectoryWarmUp, TrajectoryCoolDown, TrajectoryExplore, TrajectoryDeepen:
+	case TrajectoryContinueMood, TrajectoryWarmUp, TrajectoryCoolDown, TrajectoryIntensify, TrajectoryExplore, TrajectoryDeepen:
 		return RayTrajectoryMode(requested)
 	default:
 		return fallback
@@ -2683,6 +2703,8 @@ func buildEnergyCurve(seed library.Track, mode RayTrajectoryMode, n int) []float
 		switch mode {
 		case TrajectoryWarmUp:
 			target = clamp01(start + 0.22*frac)
+		case TrajectoryIntensify:
+			target = clamp01(start + 0.34*frac)
 		case TrajectoryCoolDown:
 			target = clamp01(start - 0.22*frac)
 		case TrajectoryExplore:
@@ -2693,7 +2715,7 @@ func buildEnergyCurve(seed library.Track, mode RayTrajectoryMode, n int) []float
 				target = clamp01(start - drift*frac*0.6)
 			}
 		case TrajectoryDeepen:
-			target = clamp01(start + 0.08*frac)
+			target = clamp01(start - 0.06*frac)
 		default:
 			target = clamp01(start + 0.04*(0.5-frac))
 		}
@@ -2718,6 +2740,10 @@ func buildRankingContext(seed library.Track, history []library.Track, mode RayTr
 	if mode == TrajectoryExplore {
 		ctx.Exploration = 0.20
 		ctx.Temperature = 0.28
+	}
+	if mode == TrajectoryIntensify {
+		ctx.Exploration = 0.03
+		ctx.Temperature = 0.12
 	}
 	if mode == TrajectoryDeepen {
 		ctx.Exploration = 0.04
@@ -2752,6 +2778,8 @@ func modeLabel(mode RayTrajectoryMode) string {
 	switch mode {
 	case TrajectoryWarmUp:
 		return "разгон"
+	case TrajectoryIntensify:
+		return "усиление"
 	case TrajectoryCoolDown:
 		return "мягкая посадка"
 	case TrajectoryExplore:
@@ -2883,6 +2911,12 @@ func emotionTargetFromMode(seed emotion.Basis, mode RayTrajectoryMode, position,
 		target.Pressure = clamp01(seed.Pressure + 0.10*p)
 		target.Joy = clamp01(seed.Joy + 0.14*p)
 		target.Serenity = clamp01(seed.Serenity - 0.08*p)
+	case TrajectoryIntensify:
+		target.Motion = clamp01(seed.Motion + 0.24*p)
+		target.Pressure = clamp01(seed.Pressure + 0.22*p)
+		target.Combat = clamp01(seed.Combat + 0.16*p)
+		target.Roughness = clamp01(seed.Roughness + 0.10*p)
+		target.Serenity = clamp01(seed.Serenity - 0.16*p)
 	case TrajectoryCoolDown:
 		target.Pressure = clamp01(seed.Pressure - 0.18*p)
 		target.Combat = clamp01(seed.Combat - 0.20*p)
@@ -3172,6 +3206,8 @@ func aggressionTransitionPenalty(prev, next library.Track, mode RayTrajectoryMod
 	switch mode {
 	case TrajectoryWarmUp:
 		return clamp01((delta - 0.25) * 1.5)
+	case TrajectoryIntensify:
+		return clamp01((delta - 0.36) * 0.9)
 	case TrajectoryExplore:
 		return clamp01((delta - 0.35) * 1.0)
 	default:
@@ -3266,6 +3302,17 @@ func tempoDirectionFit(mode RayTrajectoryMode, current, candidate library.Track)
 			return 0.55
 		}
 		return 0.25
+	case TrajectoryIntensify:
+		if delta >= 4 && delta <= 18 {
+			return 1
+		}
+		if delta >= 0 && delta <= 26 {
+			return 0.72
+		}
+		if delta >= -3 {
+			return 0.45
+		}
+		return 0.18
 	case TrajectoryCoolDown:
 		if delta <= 0 && delta >= -10 {
 			return 1
@@ -3304,6 +3351,8 @@ func modeFit(mode RayTrajectoryMode, prev, cand library.Track) float64 {
 	switch mode {
 	case TrajectoryWarmUp:
 		return clamp01(0.5 + (cm.SoftEnergy-pm.SoftEnergy)*1.4 + (cand.Party-prev.Party)*0.6)
+	case TrajectoryIntensify:
+		return clamp01(0.44 + (cm.SoftEnergy-pm.SoftEnergy)*1.2 + (cm.Aggression-pm.Aggression)*0.9 + (cand.Heaviness-prev.Heaviness)*0.5 - (cand.Relaxed-prev.Relaxed)*0.35)
 	case TrajectoryCoolDown:
 		return clamp01(0.5 + (pm.SoftEnergy-cm.SoftEnergy)*1.4 + (cand.Relaxed-prev.Relaxed)*0.6)
 	case TrajectoryExplore:

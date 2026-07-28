@@ -271,7 +271,7 @@ button {
 	background: rgba(var(--accent-rgb), 0.1);
 	border-color: var(--line-2);
 	color: var(--accent-strong);
-	box-shadow: inset 2px 0 0 var(--accent);
+	box-shadow: inset 2px 0 0 var(--accent) 2px 0 0 var(--accent);
 }
 
 .nav-btn.active svg {
@@ -4103,32 +4103,64 @@ button {
 }
 
 .app-shell.compact-player {
-	grid-template-columns: 1fr;
-	grid-template-rows: 1fr;
+	width: 100vw;
+	max-width: 100vw;
+	min-width: 0;
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr);
 	grid-template-areas: "player";
+	overflow: hidden;
 }
 .app-shell.compact-player .sidebar,
 .app-shell.compact-player .content {
 	display: none;
 }
+.app-shell.compact-player .app-layout-player,
+.app-shell.compact-player .player,
+.app-shell.compact-player .player-inner,
+.app-shell.compact-player .player-now,
+.app-shell.compact-player .transport,
+.app-shell.compact-player .player-side {
+	min-width: 0;
+	max-width: 100%;
+	overflow: hidden;
+}
 .app-shell.compact-player .player {
+	width: 100%;
 	height: 100vh;
-	padding: 8px 12px;
+	padding: 8px 10px;
 	border-top: 0;
 }
 .app-shell.compact-player .player-inner {
-	grid-template-columns: minmax(150px, 1fr) auto minmax(120px, auto);
-	gap: 10px;
+	width: 100%;
+	grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.2fr) minmax(150px, 0.72fr);
+	gap: 12px;
 }
-.app-shell.compact-player .seek {
-	width: 230px;
-}
+.app-shell.compact-player .player-now .cover,
 .app-shell.compact-player .player-emoflow,
-.app-shell.compact-player .player-now .cover {
+.app-shell.compact-player .player .meta > small:not(.player-error) {
 	display: none;
 }
 .app-shell.compact-player .player-now {
 	grid-template-columns: minmax(0, 1fr);
+}
+.app-shell.compact-player .transport {
+	width: 100%;
+}
+.app-shell.compact-player .seek {
+	width: 100%;
+	grid-template-columns: 34px minmax(80px, 1fr) 34px;
+	gap: 6px;
+}
+.app-shell.compact-player .player-side {
+	gap: 6px;
+}
+.app-shell.compact-player .volume-range {
+	width: 86px;
+	min-width: 70px;
+}
+.app-shell.compact-player .continue-chip {
+	max-width: 128px;
 }
 
 .ray-save-button {
@@ -4327,4 +4359,188 @@ button {
 }
 .task-spin {
 	animation: ray-build-spin 0.9s linear infinite;
+}
+
+/* ray_a13 follow-up: one responsive shell for full, collapsed-sidebar and compact-player modes. */
+html,
+body,
+#app {
+	width: 100%;
+	max-width: 100%;
+	overflow: hidden;
+}
+
+.app-shell {
+	--sidebar-expanded-w: 268px;
+	--sidebar-collapsed-w: 72px;
+	--sidebar-w: var(--sidebar-expanded-w);
+	grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+	min-width: 0;
+	overflow: hidden;
+	transition: grid-template-columns 180ms ease;
+}
+
+.app-shell.sidebar-collapsed {
+	--sidebar-w: var(--sidebar-collapsed-w);
+}
+
+.sidebar {
+	width: var(--sidebar-w);
+	min-width: var(--sidebar-w);
+	max-width: var(--sidebar-w);
+	padding: 0 12px 16px;
+	overflow: hidden;
+	transition:
+		width 180ms ease,
+		min-width 180ms ease,
+		max-width 180ms ease,
+		background-color 800ms ease,
+		border-color 800ms ease;
+}
+
+.sidebar > .sidebar-shell {
+	gap: 12px;
+}
+
+.sidebar-topbar {
+	display: flex;
+	flex: 0 0 48px;
+	align-items: flex-end;
+	justify-content: flex-end;
+	min-height: 48px;
+}
+
+.sidebar-collapse-button {
+	display: grid;
+	width: 32px;
+	height: 32px;
+	place-items: center;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.025);
+	color: var(--muted);
+	cursor: pointer;
+	transition:
+		background 160ms ease,
+		border-color 160ms ease,
+		color 160ms ease;
+}
+
+.sidebar-collapse-button:hover {
+	border-color: var(--line-2);
+	background: rgba(255, 255, 255, 0.055);
+	color: var(--text);
+}
+
+.sidebar-mode-switch {
+	position: relative;
+	display: grid;
+	width: 100%;
+	height: 136px;
+	place-items: center;
+	align-content: center;
+	gap: 6px;
+	overflow: hidden;
+	border: 1px solid transparent;
+	border-radius: 18px;
+	background:
+		radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent-glow) 70%, transparent), transparent 58%),
+		rgba(255, 255, 255, 0.012);
+	color: var(--mode-watermark-color);
+	cursor: pointer;
+	opacity: 0.46;
+	transition:
+		height 180ms ease,
+		opacity 180ms ease,
+		background 800ms ease,
+		border-color 180ms ease,
+		color 800ms ease;
+}
+
+.sidebar-mode-switch:hover {
+	opacity: 0.72;
+	border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+
+.sidebar-mode-switch.busy {
+	pointer-events: none;
+	opacity: 0.28;
+}
+
+.sidebar-mode-switch svg {
+	width: 78px;
+	height: 78px;
+}
+
+.sidebar-mode-switch span {
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+}
+
+.sidebar .nav {
+	position: static;
+	min-width: 0;
+}
+
+.sidebar .nav-section {
+	gap: 5px;
+}
+
+.sidebar .nav-btn {
+	min-width: 0;
+	height: 44px;
+	padding: 0 12px;
+}
+
+.sidebar-footer {
+	min-width: 0;
+}
+
+.sidebar-link-action {
+	justify-content: center;
+	color: var(--faint);
+	font-size: 11px;
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+	padding-inline: 9px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-topbar {
+	justify-content: center;
+}
+
+.app-shell.sidebar-collapsed .sidebar-mode-switch {
+	height: 62px;
+	border-radius: 15px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-mode-switch svg {
+	width: 32px;
+	height: 32px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-mode-switch span,
+.app-shell.sidebar-collapsed .nav-label,
+.app-shell.sidebar-collapsed .nav-count,
+.app-shell.sidebar-collapsed .side-action-label,
+.app-shell.sidebar-collapsed .sidebar-link-action {
+	display: none;
+}
+
+.app-shell.sidebar-collapsed .nav-btn,
+.app-shell.sidebar-collapsed .side-action {
+	justify-content: center;
+	width: 52px;
+	padding-inline: 0;
+}
+
+.app-shell.sidebar-collapsed .nav-btn {
+	gap: 0;
+}
+
+.app-shell.sidebar-collapsed .nav-btn.active {
+	box-shadow: inset 2px 0 0 var(--accent);
 }

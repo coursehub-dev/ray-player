@@ -11,6 +11,7 @@ import {
 	Volume2,
 	VolumeX,
 	Repeat,
+	ListMusic,
 } from "@lucide/svelte";
 import { IconButton, UIButton, UISlider } from "../../shared/ui";
 import { TrackMetaLine } from "../../entities/track";
@@ -57,7 +58,20 @@ const dispatch = createEventDispatcher<{
 		<div class="player-now">
 			<div class="cover"></div>
 			<div class="meta">
-				<strong>{playerTitle}</strong>
+				<div class="player-title-row">
+					<strong>{playerTitle}</strong>
+					{#if resumeSession?.available && canOpenRay}
+						<button
+							type="button"
+							class="continue-chip"
+							title={`Открыть сохранённый луч: ${resumeSession.title || playerTitle}`}
+							on:click={() => dispatch("openRay")}
+						>
+							<ListMusic size={12} strokeWidth={1.8} />
+							<span>Продолжить · {resumeSession.position || "0:00"}</span>
+						</button>
+					{/if}
+				</div>
 				{#if !playingPodcast && currentTrackMeta}
 					<TrackMetaLine track={currentTrackMeta} maxGenres={2} showBpm={true} />
 				{:else}
@@ -65,11 +79,6 @@ const dispatch = createEventDispatcher<{
 				{/if}
 				{#if !playingPodcast && playbackCurrentGenre}
 					<small>{playbackCurrentGenre}</small>
-				{/if}
-				{#if resumeSession?.available && canOpenRay}
-					<button type="button" class="continue-chip" on:click={() => dispatch("openRay")}>
-						{resumeSession.title || "Открыть луч"} · {resumeSession.position || "0:00"}
-					</button>
 				{/if}
 				{#if playbackStatus === "error" && playbackLastError}
 					<small class="player-error">
@@ -144,15 +153,6 @@ const dispatch = createEventDispatcher<{
 		<div class="player-side">
 			<button
 				type="button"
-				class="min-player-toggle"
-				class:active={compact}
-				title={compact ? "Развернуть" : "Свернуть"}
-				on:click={() => dispatch("compact")}
-			>
-				min
-			</button>
-			<button
-				type="button"
 				class="volume-icon-button"
 				class:muted={volumeIconLevel === "muted"}
 				aria-label={volumeIconLevel === "muted" ? "Включить звук" : "Выключить звук"}
@@ -182,6 +182,15 @@ const dispatch = createEventDispatcher<{
 					on:commit={(e) => dispatch("volumeCommit", e.detail)}
 				/>
 			</div>
+			<button
+				type="button"
+				class="min-player-toggle"
+				class:active={compact}
+				title={compact ? "Развернуть" : "Свернуть"}
+				on:click={() => dispatch("compact")}
+			>
+				min
+			</button>
 		</div>
 	</div>
 </footer>

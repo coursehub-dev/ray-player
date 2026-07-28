@@ -73,7 +73,19 @@ import {
 	resolvePlayerTitle,
 	resolveVisualMode,
 } from "./entities/playback";
-import { Search, Bookmark, FolderPlus, FilePlus2, ListMusic, X, Mic, Music2, Link, Stethoscope } from "@lucide/svelte";
+import {
+	Bookmark,
+	FolderPlus,
+	FilePlus2,
+	Library,
+	ListMusic,
+	X,
+	Mic,
+	Music2,
+	PanelLeftClose,
+	PanelLeftOpen,
+	Stethoscope,
+} from "@lucide/svelte";
 import {
 	WindowGetPosition,
 	WindowGetSize,
@@ -228,7 +240,12 @@ let moodFilter = "";
 let suggestionToken = 0;
 let tasks = [];
 let compactMode = false;
+let sidebarCollapsed = false;
 let restoreWindow = null;
+let resumePrompt = null;
+
+const compactPlayerSize = { width: 760, height: 136 };
+const normalWindowMinimum = { width: 980, height: 720 };
 let ytDlpCheck = null;
 let ytDlpChecking = false;
 let externalSettingsSaving = false;
@@ -250,6 +267,10 @@ const probeLabel = (probe) => {
 
 const unsubscribeState = state.subscribe((v) => {
 	appState = v;
+
+	if (resumePrompt?.trackId && v.current?.currentTrackId && v.current.currentTrackId !== resumePrompt.trackId) {
+		resumePrompt = null;
+	}
 
 	const incomingDuration = Number(v.current?.durationMs) || 0;
 	if (incomingDuration > 0) {
@@ -590,6 +611,7 @@ onMount(async () => {
 	appState = $state;
 	libraryMode = appState.libraryMode === "podcast" ? "podcast" : "music";
 	podcastResults = appState.podcasts || [];
+	resumePrompt = appState.resumeSession?.available ? { ...appState.resumeSession } : null;
 
 	await runSearch("");
 	results = $searchResults || [];
@@ -705,6 +727,9 @@ const togglePause = async () => {
 };
 
 const playOrToggle = async (trackId, targetScreen = null) => {
+	if (resumePrompt?.trackId && trackId !== resumePrompt.trackId) {
+		resumePrompt = null;
+	}
 	const track = findTrackById(trackId);
 	if (track && !externalPlayable(track)) {
 		return;
@@ -757,11 +782,13 @@ const playTrackFromQueue = async (trackId) => {
 };
 
 const resumeRay = async (rayId) => {
+	resumePrompt = null;
 	await resumeMusicRay(rayId);
 	setScreen("ray");
 };
 
 const resumeSavedRay = async (rayId) => {
+	resumePrompt = null;
 	await syncPayload(Promise.resolve(api.resumeSavedMusicRay(rayId)));
 	setScreen("ray");
 };
@@ -840,19 +867,28 @@ $: activeTaskCount =
 const toggleCompact = async () => {
 	if (!compactMode) {
 		restoreWindow = { size: await WindowGetSize(), position: await WindowGetPosition() };
-		WindowSetMinSize(480, 108);
-		WindowSetSize(560, 124);
+
+		// Switch the DOM first. Shrinking the native window while the full
+		// three-column player is still mounted creates WebView scrollbars.
 		compactMode = true;
+		await tick();
+		WindowSetMinSize(compactPlayerSize.width, compactPlayerSize.height);
+		WindowSetSize(compactPlayerSize.width, compactPlayerSize.height);
 		return;
 	}
-	compactMode = false;
-	WindowSetMinSize(980, 720);
+
+	WindowSetMinSize(normalWindowMinimum.width, normalWindowMinimum.height);
 	if (restoreWindow?.size) WindowSetSize(restoreWindow.size.w, restoreWindow.size.h);
 	if (restoreWindow?.position) WindowSetPosition(restoreWindow.position.x, restoreWindow.position.y);
+	await tick();
+	compactMode = false;
 	restoreWindow = null;
 };
 
-const openCurrentRay = () => setScreen("ray");
+const openCurrentRay = () => {
+	resumePrompt = null;
+	setScreen("ray");
+};
 const addFolder = async () => {
 	await syncPayload(libraryMode === "podcast" ? api.addPodcastFolder() : api.addFolder());
 	if (libraryMode === "podcast") {
@@ -1507,92 +1543,107 @@ $: playerSubline = playingPodcast
 
 <AppLayout
 	indexing={$indexingState.isIndexing}
-	{visualMode}		shellStyle={appShellStyle}
-		compact={compactMode}
+	{visualMode}
+	shellStyle={appShellStyle}
+	compact={compactMode}
+	{sidebarCollapsed}
 >
-	<div slot="sidebar">
-		<div class="brand">
-			<strong>Local Ray Player</strong>
-			<span>локальный умный аудиоплеер</span>
+	<div slot="sidebar" class="sidebar-shell">
+		<div class="sidebar-topbar">
+			<button
+				type="button"
+				class="sidebar-collapse-button"
+				aria-label={sidebarCollapsed ? "Развернуть боковую панель" : "Свернуть боковую панель"}
+				title={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
+				on:click={() => (sidebarCollapsed = !sidebarCollapsed)}
+			>
+				{#if sidebarCollapsed}
+					<PanelLeftOpen size={17} strokeWidth={1.8} />
+				{:else}
+					<PanelLeftClose size={17} strokeWidth={1.8} />
+				{/if}
+			</button>
 		</div>
 
+		<button
+			type="button"
+			class="sidebar-mode-switch"
+			class:busy={modeSwitchBusy}
+			aria-label={libraryMode === "podcast"
+				? "Переключиться в режим музыки"
+				: "Переключиться в режим подкастов"}
+			title={libraryMode === "podcast"
+				? "Режим подкастов. Нажмите для музыки"
+				: "Режим музыки. Нажмите для подкастов"}
+			on:click={toggleLibraryMode}
+		>
+			{#if visualMode === "podcast"}
+				<Mic strokeWidth={1} aria-hidden="true" />
+			{:else}
+				<Music2 strokeWidth={1} aria-hidden="true" />
+			{/if}
+			<span>{libraryMode === "podcast" ? "Подкасты" : "Музыка"}</span>
+		</button>
+
 		<nav class="nav">
-			<div class="nav-section nav-top">
+			<div class="nav-section">
 				<button
 					class:active={currentScreen === "ray"}
 					class="nav-btn nav-ray-btn"
 					data-playing={rayPlaying() ? "1" : "0"}
+					title="Луч"
 					on:click={() => setScreen("ray")}
 				>
-					<span class="nav-icon nav-eq" aria-hidden="true">
-						<i></i><i></i><i></i>
-					</span>
-					<span>Луч</span>
+					<span class="nav-icon nav-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+					<span class="nav-label">Луч</span>
 				</button>
 
-				<button
-					type="button"
-					class="sidebar-mode-watermark"
-					class:busy={modeSwitchBusy}
-					aria-label={libraryMode === "podcast"
-						? "Переключиться в режим музыки"
-						: "Переключиться в режим подкастов"}
-					title={libraryMode === "podcast"
-						? "Режим подкастов. Нажмите для музыки"
-						: "Режим музыки. Нажмите для подкастов"}
-					on:click={toggleLibraryMode}
-				>
-					{#if visualMode === "podcast"}
-						<Mic strokeWidth={1} aria-hidden="true" />
-					{:else}
-						<Music2 strokeWidth={1} aria-hidden="true" />
-					{/if}
-					<span>
-						{libraryMode === "podcast" ? "Подкасты" : "Музыка"}
-					</span>
-				</button>
-			</div>
-
-			<div class="nav-divider"></div>
-			<div class="nav-section nav-bottom">
 				<button
 					class:active={currentScreen === "search"}
 					class="nav-btn"
+					title="Библиотека"
 					on:click={() => setScreen("search")}
-					><span class="nav-icon"><Search size={16} strokeWidth={1.8} /></span><span>Поиск</span></button
-				>					<button
-						class:active={currentScreen === "saved"}
-						class="nav-btn"
-						on:click={() => setScreen("saved")}
-						><span class="nav-icon"><Bookmark size={16} strokeWidth={1.8} /></span><span>Сохранённое</span><small class="nav-count">{libraryMode === "podcast" ? (appState.savedPodcastRayIds || []).length : (appState.savedRays || []).length}</small></button
-					>
+				>
+					<span class="nav-icon"><Library size={16} strokeWidth={1.8} /></span>
+					<span class="nav-label">Библиотека</span>
+				</button>
+
+				<button
+					class:active={currentScreen === "saved"}
+					class="nav-btn"
+					title="Сохранённое"
+					on:click={() => setScreen("saved")}
+				>
+					<span class="nav-icon"><Bookmark size={16} strokeWidth={1.8} /></span>
+					<span class="nav-label">Сохранённое</span>
+					<small class="nav-count">{libraryMode === "podcast" ? (appState.savedPodcastRayIds || []).length : (appState.savedRays || []).length}</small>
+				</button>
+
 				<button
 					class:active={currentScreen === "rays"}
 					class="nav-btn"
+					title="История лучей"
 					on:click={() => setScreen("rays")}
-					><span class="nav-icon"><ListMusic size={16} strokeWidth={1.8} /></span><span>История лучей</span><small class="nav-count">{libraryMode === "podcast" ? (appState.podcastRays || []).length : (appState.rays || []).length}</small></button
 				>
+					<span class="nav-icon"><ListMusic size={16} strokeWidth={1.8} /></span>
+					<span class="nav-label">История лучей</span>
+					<small class="nav-count">{libraryMode === "podcast" ? (appState.podcastRays || []).length : (appState.rays || []).length}</small>
+				</button>
 			</div>
 		</nav>
 
 		<div class="sidebar-footer">
-			<button class="side-action" type="button" on:click={addFolder}
-				><FolderPlus size={16} strokeWidth={1.8} /> Добавить папку {libraryMode === "podcast" ? "подкастов" : "музыки"}</button
-			>
-			<div class="add-actions">
-				<button
-					class="icon-add-button"
-					type="button"
-					title="Добавить ссылку"
-					aria-label="Добавить ссылку"
-					on:click={openAddLinkModal}
-				>
-					<Link size={17} strokeWidth={1.8} />
-				</button>
-				<button class="side-action add-file-button" type="button" on:click={addFiles}
-					><FilePlus2 size={16} strokeWidth={1.8} /> Добавить {libraryMode === "podcast" ? "выпуск" : "файл"}</button
-				>
-			</div>
+			<button class="side-action" type="button" title="Добавить папку" on:click={addFolder}>
+				<FolderPlus size={17} strokeWidth={1.8} />
+				<span class="side-action-label">Добавить папку {libraryMode === "podcast" ? "подкастов" : "музыки"}</span>
+			</button>
+			<button class="side-action" type="button" title="Добавить файл" on:click={addFiles}>
+				<FilePlus2 size={17} strokeWidth={1.8} />
+				<span class="side-action-label">Добавить {libraryMode === "podcast" ? "выпуск" : "файл"}</span>
+			</button>
+			<button class="side-action sidebar-link-action" type="button" on:click={openAddLinkModal}>
+				<span class="side-action-label">Скачать по ссылке</span>
+			</button>
 		</div>
 	</div>
 
@@ -1618,18 +1669,10 @@ $: playerSubline = playingPodcast
 		{#if currentScreen === "search"}
 			<SearchPage
 				{libraryMode}
-				{appState}
 				playback={$playbackState}
-				indexing={$indexingState}
-				bind:query
-				bind:searchInputEl
 				{libraryEmpty}
 				{podcastResults}
 				{visibleResults}
-				{emoFlowDirectionLabel}
-				{emoFlowSummary}
-				{openSettings}
-				{searchCurrentLibrary}
 				{togglePodcastRow}
 				{playOrToggle}
 				{openTrackMenu}
@@ -1757,7 +1800,7 @@ $: playerSubline = playingPodcast
 			on:mute={togglePlayerMute}
 			on:volumePreview={(e) => setPlayerVolume(e.detail)}
 			compact={compactMode}
-			resumeSession={appState.resumeSession}
+			resumeSession={resumePrompt}
 			canOpenRay={Boolean(appState.musicRay?.id || appState.podcastRay?.id)}
 			on:volumeCommit={(e) => commitVolume(e.detail)}
 			on:compact={toggleCompact}

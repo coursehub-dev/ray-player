@@ -44,6 +44,8 @@ const moodTitle: Record<string, string> = {
 							type="button"
 							class={`mood-square mood-${mood}`}
 							class:active={moodFilter === mood}
+							aria-label={moodTitle[mood]}
+							aria-pressed={moodFilter === mood}
 							title={moodTitle[mood]}
 							on:mousedown|preventDefault={() => onMood(moodFilter === mood ? "" : mood)}
 						></button>
@@ -71,7 +73,6 @@ const moodTitle: Record<string, string> = {
 		<div class="global-suggestions" role="listbox" tabindex="-1" on:mousedown|preventDefault>
 			{#each suggestions.slice(0, 5) as item}
 				<button type="button" class="global-suggestion" on:click={() => onStart(item)}>
-					<span class={`suggestion-mark mood-${item.moodGroup || "unknown"}`}></span>
 					<span class="suggestion-copy">
 						<strong>{item.track?.title || "Без названия"}</strong>
 						<small>{[item.track?.artist, item.track?.album, item.mood].filter(Boolean).join(" · ") || "Без анализа"}</small>

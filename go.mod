@@ -9,6 +9,7 @@ require (
 	github.com/sugarme/tokenizer v0.3.0
 	github.com/wailsapp/wails/v2 v2.13.0
 	github.com/yalue/onnxruntime_go v1.31.0
+	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.54.0
 )
 
@@ -55,7 +56,6 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

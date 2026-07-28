@@ -1,54 +1,23 @@
 package externalmedia
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
 func DefaultDownloadsDir() string {
 	home, err := os.UserHomeDir()
-	if err != nil {
+	if err != nil || strings.TrimSpace(home) == "" {
 		return os.TempDir()
 	}
-	if runtime.GOOS == "linux" {
-		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
-		if configHome == "" {
-			configHome = filepath.Join(home, ".config")
-		}
-		if dir := linuxXDGDownloadDir(filepath.Join(configHome, "user-dirs.dirs"), home); dir != "" {
-			return dir
-		}
+	if dir := strings.TrimSpace(platformDownloadsDir(home)); dir != "" {
+		return filepath.Clean(dir)
 	}
 
-	dir := filepath.Join(home, "Downloads")
-	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		return dir
-	}
-	return os.TempDir()
-}
-
-func linuxXDGDownloadDir(path, home string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "XDG_DOWNLOAD_DIR=") {
-			continue
-		}
-		value := strings.Trim(strings.TrimPrefix(line, "XDG_DOWNLOAD_DIR="), `"`)
-		value = strings.ReplaceAll(value, "$HOME", home)
-		if value != "" {
-			return filepath.Clean(value)
-		}
-	}
-	return ""
+	// Do not fall back to the system temp directory merely because Downloads
+	// has not been created yet. The yt-dlp worker creates the final directory.
+	return filepath.Join(home, "Downloads")
 }
 
 func ResolveDownloadDir(

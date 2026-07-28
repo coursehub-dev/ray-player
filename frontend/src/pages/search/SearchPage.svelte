@@ -1,23 +1,14 @@
 <script lang="ts">
-import { Search, Settings, Play, Pause, LoaderCircle, Sparkles, CheckCircle2, FileText } from "@lucide/svelte";
-import { IconButton } from "../../shared/ui";
+import { Play, Pause, LoaderCircle, Sparkles, CheckCircle2, FileText } from "@lucide/svelte";
 import { TrackMetaLine } from "../../entities/track";
 import { PodcastProgressBar } from "../../entities/podcast";
 
 export let libraryMode: string = "music";
-export let appState: any = {};
 export let playback: any = {};
-export let indexing: any = {};
-export let query = "";
-export let searchInputEl: HTMLInputElement | null = null;
 export let libraryEmpty = false;
 export let podcastResults: any[] = [];
 export let visibleResults: any[] = [];
-export let emoFlowDirectionLabel = "";
-export let emoFlowSummary = "";
 
-export let openSettings: () => void = () => {};
-export let searchCurrentLibrary: (value: string) => void = () => {};
 export let togglePodcastRow: (id: string, fromRay: boolean) => void = () => {};
 export let playOrToggle: (trackId: string, screen?: string | null) => void = () => {};
 export let openTrackMenu: (event: MouseEvent | KeyboardEvent, trackId: string, source: string) => void = () => {};
@@ -33,66 +24,8 @@ export let rowRaySeed: (trackId: string) => boolean = () => false;
 export let genreBadge: (track: any) => string = () => "";
 </script>
 
-<section class="screen active">
-	<div class="screen-head">
-		<div>
-			<h1>{libraryMode === "podcast" ? "Подкасты" : "Поиск"}</h1>
-			{#if libraryMode === "podcast"}
-				<p>
-					Отдельная библиотека выпусков с папками,
-					сериями и памятью прогресса.
-				</p>
-			{:else}
-				<p>
-					Поиск по локальной библиотеке. Имя файла, теги,
-					артист, альбом. Клик запускает трек и базовый луч.
-				</p>
-			{/if}
-		</div>
-		<div class="top-right-status">
-			<div class:accent-reactive={indexing.isIndexing} class="library-status">
-				{libraryMode === "podcast"
-					? `${(appState.podcasts || []).length} episodes`
-					: indexing.isIndexing && indexing.total > 0
-						? `${indexing.processed}/${indexing.total}`
-						: `${indexing.libraryCount || appState.libraryStat?.tracks || 0} tracks`}
-			</div>
-			<IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton>
-		</div>
-	</div>
-	<div class="screen-body search-layout">
-		<div class="hero">
-			<div class="hero-top">
-				<span class="pulse"></span>
-				<span>{libraryMode === "podcast" ? "PodcastFlow · смысловой маршрут" : `EmoFlow UI · ${emoFlowDirectionLabel}`}</span>
-			</div>
-			<h2>
-				{libraryMode === "podcast"
-					? "Продолжи тему. Не потеряй место."
-					: "Найди трек. Запусти луч."}
-			</h2>
-			<p>
-				{libraryMode === "podcast"
-					? "Ищи по названию, автору, серии и папке. Недослушанные выпуски поднимаются выше."
-					: "Минимум визуального шума. Поиск, запуск и умные локальные рекомендации — всё остальное уходит под капот."}
-				{#if libraryMode === "music" && emoFlowSummary}
-					<span class="emoflow-copy">Сейчас: {emoFlowSummary}.</span>
-				{/if}
-			</p>
-			<div class="hero-ambient" aria-hidden="true"></div>
-		</div>
-		<div class="search-input-wrap">
-			<span class="search-mark"><Search size={18} strokeWidth={1.8} /></span>
-			<input
-				bind:this={searchInputEl}
-				class="search-input"
-				bind:value={query}
-				placeholder={libraryMode === "podcast" ? "Искать выпуск, автора, серию или папку" : "Искать в локальной библиотеке"}
-				on:input={(e) => searchCurrentLibrary(e.currentTarget.value)}
-			/>
-			<span class="kbd">⌘ / Ctrl + K</span>
-		</div>
-
+<section class="screen active library-screen">
+	<div class="screen-body library-layout">
 		{#if libraryEmpty}
 			<div class="empty-state">
 				<strong>Библиотека пока пустая</strong>

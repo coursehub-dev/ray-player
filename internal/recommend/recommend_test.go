@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -197,13 +198,92 @@ func TestExplainEmotionTransitionRejectsFalseCloseVibe(t *testing.T) {
 
 func TestBuildEnergyCurveByMode(t *testing.T) {
 	seed := withMood(testTrack("seed", "Seed", 0, 120, 0.30, []float32{1, 0, 0}), 0.30, 0.3, 0.7, 0.2, 0.7, 0.2, 0.7, 0.1, 0.1)
+	stable := buildEnergyCurve(seed, TrajectoryContinueMood, 6)
 	warm := buildEnergyCurve(seed, TrajectoryWarmUp, 6)
+	intense := buildEnergyCurve(seed, TrajectoryIntensify, 6)
 	cool := buildEnergyCurve(seed, TrajectoryCoolDown, 6)
+	deepen := buildEnergyCurve(seed, TrajectoryDeepen, 6)
+	explore := buildEnergyCurve(seed, TrajectoryExplore, 6)
+
 	if warm[len(warm)-1] <= warm[0] {
 		t.Fatalf("expected warm_up to increase energy: %+v", warm)
 	}
+	if intense[len(intense)-1] <= warm[len(warm)-1] {
+		t.Fatalf("expected intensify to be stronger than warm_up: warm=%+v intensify=%+v", warm, intense)
+	}
 	if cool[len(cool)-1] >= cool[0] {
 		t.Fatalf("expected cool_down to decrease energy: %+v", cool)
+	}
+	if deepen[len(deepen)-1] >= deepen[0] {
+		t.Fatalf("expected deepen to lower activation while increasing emotional depth: %+v", deepen)
+	}
+	if math.Abs(stable[len(stable)-1]-stable[0]) > 0.05 {
+		t.Fatalf("expected stable to stay near seed energy: %+v", stable)
+	}
+	if explore[1] == explore[2] || explore[2] == explore[3] {
+		t.Fatalf("expected explore to alternate around the seed: %+v", explore)
+	}
+}
+
+func TestEmotionTargetProgramsRemainSemanticallyDistinct(t *testing.T) {
+	seed := emotion.Basis{
+		Joy:        0.50,
+		Melancholy: 0.40,
+		Serenity:   0.45,
+		Combat:     0.30,
+		Pressure:   0.35,
+		Roughness:  0.30,
+		Swagger:    0.35,
+		Brightness: 0.45,
+		Motion:     0.45,
+	}
+
+	warm := emotionTargetFromMode(seed, TrajectoryWarmUp, 10, 10)
+	intense := emotionTargetFromMode(seed, TrajectoryIntensify, 10, 10)
+	cool := emotionTargetFromMode(seed, TrajectoryCoolDown, 10, 10)
+	deep := emotionTargetFromMode(seed, TrajectoryDeepen, 10, 10)
+	explore := emotionTargetFromMode(seed, TrajectoryExplore, 10, 10)
+	stable := emotionTargetFromMode(seed, TrajectoryContinueMood, 10, 10)
+
+	if warm.Motion <= seed.Motion || warm.Joy <= seed.Joy {
+		t.Fatalf("warm_up target does not warm up: %+v", warm)
+	}
+	if intense.Pressure <= warm.Pressure || intense.Combat <= seed.Combat {
+		t.Fatalf("intensify target must add more pressure/combat than warm_up: warm=%+v intense=%+v", warm, intense)
+	}
+	if cool.Serenity <= seed.Serenity || cool.Pressure >= seed.Pressure || cool.Combat >= seed.Combat {
+		t.Fatalf("cool_down target is not calmer: %+v", cool)
+	}
+	if deep.Melancholy <= seed.Melancholy || deep.Serenity <= seed.Serenity || deep.Joy >= seed.Joy {
+		t.Fatalf("deepen target is not deeper: %+v", deep)
+	}
+	if explore.Swagger <= seed.Swagger || explore.Brightness <= seed.Brightness {
+		t.Fatalf("explore target does not open adjacent colour: %+v", explore)
+	}
+	if stable != seed {
+		t.Fatalf("stable target changed seed: got=%+v want=%+v", stable, seed)
+	}
+}
+
+func TestNormalizeRayModeKeepsSixUserModesDistinct(t *testing.T) {
+	tests := []struct {
+		requested string
+		want      RayTrajectoryMode
+	}{
+		{requested: "stable", want: TrajectoryContinueMood},
+		{requested: "warm_up", want: TrajectoryWarmUp},
+		{requested: "cool_down", want: TrajectoryCoolDown},
+		{requested: "intensify", want: TrajectoryIntensify},
+		{requested: "deepen", want: TrajectoryDeepen},
+		{requested: "explore", want: TrajectoryExplore},
+	}
+
+	for _, test := range tests {
+		t.Run(test.requested, func(t *testing.T) {
+			if got := normalizeRayMode(test.requested, TrajectoryExplore); got != test.want {
+				t.Fatalf("normalizeRayMode(%q)=%q want %q", test.requested, got, test.want)
+			}
+		})
 	}
 }
 
