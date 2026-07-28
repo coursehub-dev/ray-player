@@ -121,9 +121,10 @@ func (j Job) DTO() JobDTO {
 }
 
 type Settings struct {
-	YtDlpPath        string `json:"ytDlpPath"`
-	FFmpegPath       string `json:"ffmpegPath"`
-	YtDlpDownloadDir string `json:"ytDlpDownloadDir"`
+	YtDlpPath          string `json:"ytDlpPath"`
+	FFmpegPath         string `json:"ffmpegPath"`
+	MusicDownloadDir   string `json:"musicDownloadDir"`
+	PodcastDownloadDir string `json:"podcastDownloadDir"`
 }
 
 type ToolCheckResult struct {

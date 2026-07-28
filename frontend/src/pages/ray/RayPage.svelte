@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Settings, Play, Pause, GripVertical, Trash2 } from "@lucide/svelte";
+import { Bookmark, Settings, Play, Pause, GripVertical, Trash2 } from "@lucide/svelte";
 import { IconButton, UIButton } from "../../shared/ui";
 import { RayTrackRow } from "../../entities/ray";
 import { PodcastProgressBar } from "../../entities/podcast";
@@ -11,7 +11,9 @@ export let playback: any = {};
 export let indexing: any = {};
 export let currentTrack: any = {};
 export let rayBuild: any = {};
-export let selectedRayMode = "";
+export let musicRaySaved = false;
+export let podcastRaySaved = false;
+export let toggleCurrentRaySaved: () => void = () => {};
 export let showInsight = false;
 export let auditRows: any[] = [];
 export let emoFlowDirectionLabel = "";
@@ -215,18 +217,10 @@ export let openTrackMenu: (event: MouseEvent | KeyboardEvent, trackId: string, s
 						<span class={`badge emotion emotion-${emoFlowEmotionLabel.replace(/ /g, "-")}`}>
 							{emoFlowEmotionLabel}
 						</span>
-					{/if}
-					<label class="badge genre">mode
-						<select bind:value={selectedRayMode} style="margin-left:6px; background:transparent; color:inherit; border:none;">
-							<option value="">auto</option>
-							<option value="continue_mood">continue</option>
-							<option value="warm_up">warm_up</option>
-							<option value="cool_down">cool_down</option>
-							<option value="explore">explore</option>
-							<option value="deepen">deepen</option>
-						</select>
-					</label>
-					<UIButton compact className="badge-height" on:click={toggleInsight}
+					{/if}								<button type="button" class:active={libraryMode === 'podcast' ? podcastRaySaved : musicRaySaved} class="ray-save-button" on:click={toggleCurrentRaySaved} title="Сохранить луч">
+									Bookmark size={14}
+								</button>
+								<UIButton compact className="badge-height" on:click={toggleInsight}
 						>{showInsight ? "hide insight" : "show insight"}</UIButton
 					>
 				</div>

@@ -2652,9 +2652,19 @@ func inferRayMode(seed library.Track, tracks []library.Track, feedback map[strin
 }
 
 func normalizeRayMode(requested string, fallback RayTrajectoryMode) RayTrajectoryMode {
-	switch RayTrajectoryMode(strings.TrimSpace(requested)) {
+	requested = strings.TrimSpace(requested)
+	// UI теперь использует один persistable ContentMode. Stable и intensify
+	// тоже должны иметь определённую trajectory semantics, а не случайно
+	// проваливаться в inferRayMode().
+	switch rays.NormalizeContentMode(requested) {
+	case rays.ContentStable:
+		return TrajectoryContinueMood
+	case rays.ContentIntensify:
+		return TrajectoryWarmUp
+	}
+	switch RayTrajectoryMode(requested) {
 	case TrajectoryContinueMood, TrajectoryWarmUp, TrajectoryCoolDown, TrajectoryExplore, TrajectoryDeepen:
-		return RayTrajectoryMode(strings.TrimSpace(requested))
+		return RayTrajectoryMode(requested)
 	default:
 		return fallback
 	}

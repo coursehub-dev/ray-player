@@ -21,6 +21,7 @@ import (
 	"ray-player1/internal/db"
 	"ray-player1/internal/deps"
 	"ray-player1/internal/emoflow"
+	"ray-player1/internal/emotion"
 	"ray-player1/internal/events"
 	"ray-player1/internal/externalmedia"
 	"ray-player1/internal/library"
@@ -40,6 +41,8 @@ const (
 	metaPlayerMuted            = "player.muted"
 	metaPlayerLastNonZeroVol   = "player.last_nonzero_volume"
 	metaNormalizePodcastVolume = "podcast.normalize_volume"
+	metaLibraryMode            = "ui.library_mode"
+	metaPodcastSavedRays       = "podcast.saved_rays"
 )
 
 type App struct {
@@ -106,23 +109,45 @@ type playbackMilestones struct {
 }
 
 type BootstrapPayload struct {
-	Library           []library.Track          `json:"library"`
-	Podcasts          []podcast.Item           `json:"podcasts"`
-	PodcastRay        podcast.Ray              `json:"podcastRay"`
-	PodcastPlayback   podcast.Playback         `json:"podcastPlayback"`
-	PodcastHistory    []podcast.HistoryItem    `json:"podcastHistory"`
-	PodcastRays       []podcast.RayHistoryItem `json:"podcastRays"`
-	Current           appstate.PlayerState     `json:"current"`
-	History           []events.HistoryItem     `json:"history"`
-	Rays              []rays.RaySummary        `json:"rays"`
-	Queue             []rays.QueueItem         `json:"queue"`
-	MusicRay          rays.Ray                 `json:"musicRay"`
-	LibraryStat       library.LibraryStats     `json:"libraryStat"`
-	Roots             []library.LibraryRoot    `json:"roots,omitempty"`
-	ImportErrors      []library.FileError      `json:"importErrors,omitempty"`
-	EmoFlow           emoflow.UIState          `json:"emoFlow"`
-	EmoFlowUISettings emoflow.UISettings       `json:"emoFlowUiSettings"`
-	RayBuild          appstate.RayBuildState   `json:"rayBuild"`
+	Library            []library.Track          `json:"library"`
+	Podcasts           []podcast.Item           `json:"podcasts"`
+	PodcastRay         podcast.Ray              `json:"podcastRay"`
+	PodcastPlayback    podcast.Playback         `json:"podcastPlayback"`
+	PodcastHistory     []podcast.HistoryItem    `json:"podcastHistory"`
+	PodcastRays        []podcast.RayHistoryItem `json:"podcastRays"`
+	Current            appstate.PlayerState     `json:"current"`
+	History            []events.HistoryItem     `json:"history"`
+	Rays               []rays.RaySummary        `json:"rays"`
+	SavedRays          []rays.RaySummary        `json:"savedRays"`
+	SavedPodcastRayIDs []string                 `json:"savedPodcastRayIds"`
+	Queue              []rays.QueueItem         `json:"queue"`
+	MusicRay           rays.Ray                 `json:"musicRay"`
+	LibraryStat        library.LibraryStats     `json:"libraryStat"`
+	Roots              []library.LibraryRoot    `json:"roots,omitempty"`
+	ImportErrors       []library.FileError      `json:"importErrors,omitempty"`
+	EmoFlow            emoflow.UIState          `json:"emoFlow"`
+	EmoFlowUISettings  emoflow.UISettings       `json:"emoFlowUiSettings"`
+	RayBuild           appstate.RayBuildState   `json:"rayBuild"`
+	LibraryMode        string                   `json:"libraryMode"`
+	ResumeSession      ResumeSession            `json:"resumeSession"`
+}
+
+type ResumeSession struct {
+	Available   bool   `json:"available"`
+	LibraryMode string `json:"libraryMode"`
+	TrackID     string `json:"trackId"`
+	RayID       string `json:"rayId"`
+	Title       string `json:"title"`
+	PositionMs  int    `json:"positionMs"`
+	Position    string `json:"position"`
+}
+
+type SearchSuggestion struct {
+	Track     library.Track `json:"track"`
+	Score     float64       `json:"score"`
+	Mood      string        `json:"mood"`
+	MoodGroup string        `json:"moodGroup"`
+	Analyzed  bool          `json:"analyzed"`
 }
 
 type SettingsPayload struct {
@@ -136,6 +161,7 @@ type SettingsPayload struct {
 	ExtendRay              bool               `json:"extendRay"`
 	EmoFlowUI              emoflow.UISettings `json:"emoFlowUi"`
 	NormalizePodcastVolume bool               `json:"normalizePodcastVolume"`
+	YtDlpPath              string             `json:"ytDlpPath"`
 }
 
 type ImportResult = library.ImportSummary
@@ -527,25 +553,108 @@ func (a *App) Bootstrap() BootstrapPayload {
 	podcasts, _ := a.podcasts.List(500)
 	podcastHistory, _ := a.podcastHistory.List(200)
 	podcastRays, _ := a.podcastHistory.RayList(100)
+	libraryMode := a.libraryMode()
+	savedPodcastRayIDs := a.savedPodcastRayIDs()
 	return BootstrapPayload{
-		Library:           a.library.AllTracks(),
-		Podcasts:          podcasts,
-		PodcastRay:        a.podcasts.CurrentRay(),
-		PodcastPlayback:   a.podcastPlayback,
-		PodcastHistory:    podcastHistory,
-		PodcastRays:       podcastRays,
-		Current:           current,
-		History:           a.events.History(),
-		Rays:              a.rays.Summaries(),
-		Queue:             queue,
-		MusicRay:          a.rays.CurrentRay(),
-		LibraryStat:       a.library.Stats(),
-		Roots:             roots,
-		ImportErrors:      errs,
-		EmoFlow:           a.GetCurrentEmoFlow(),
-		EmoFlowUISettings: a.getEmoFlowSettings(),
-		RayBuild:          buildState,
+		Library:            a.library.AllTracks(),
+		Podcasts:           podcasts,
+		PodcastRay:         a.podcasts.CurrentRay(),
+		PodcastPlayback:    a.podcastPlayback,
+		PodcastHistory:     podcastHistory,
+		PodcastRays:        podcastRays,
+		Current:            current,
+		History:            a.events.History(),
+		Rays:               a.rays.Summaries(),
+		SavedRays:          a.rays.SavedSummaries(),
+		SavedPodcastRayIDs: savedPodcastRayIDs,
+		Queue:              queue,
+		MusicRay:           a.rays.CurrentRay(),
+		LibraryStat:        a.library.Stats(),
+		Roots:              roots,
+		ImportErrors:       errs,
+		EmoFlow:            a.GetCurrentEmoFlow(),
+		EmoFlowUISettings:  a.getEmoFlowSettings(),
+		RayBuild:           buildState,
+		LibraryMode:        libraryMode,
+		ResumeSession:      a.resumeSession(),
 	}
+}
+
+func (a *App) libraryMode() string {
+	value, err := a.store.GetMeta(metaLibraryMode)
+	if err == nil && strings.TrimSpace(value) == "podcast" {
+		return "podcast"
+	}
+	return "music"
+}
+
+func (a *App) SetLibraryMode(mode string) (BootstrapPayload, error) {
+	mode = strings.TrimSpace(mode)
+	if mode != "music" && mode != "podcast" {
+		return BootstrapPayload{}, fmt.Errorf("invalid library mode: %s", mode)
+	}
+	if err := a.store.SetMeta(metaLibraryMode, mode); err != nil {
+		return BootstrapPayload{}, err
+	}
+	return a.Bootstrap(), nil
+}
+
+func (a *App) resumeSession() ResumeSession {
+	st := a.state.Get()
+	if st.CurrentTrackID == "" {
+		return ResumeSession{}
+	}
+	mode := "music"
+	if isPodcastTrackID(st.CurrentTrackID) {
+		mode = "podcast"
+	}
+	return ResumeSession{
+		Available:   true,
+		LibraryMode: mode,
+		TrackID:     st.CurrentTrackID,
+		RayID:       st.CurrentRayID,
+		Title:       st.CurrentTitle,
+		PositionMs:  st.PositionMs,
+		Position:    formatPlaybackPosition(st.PositionMs),
+	}
+}
+
+func (a *App) savedPodcastRayIDs() []string {
+	value, err := a.store.GetMeta(metaPodcastSavedRays)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return []string{}
+	}
+	var ids []string
+	if json.Unmarshal([]byte(value), &ids) != nil {
+		return []string{}
+	}
+	return ids
+}
+
+func (a *App) SetPodcastRaySaved(rayID string, saved bool) (BootstrapPayload, error) {
+	ids := a.savedPodcastRayIDs()
+	set := make(map[string]bool, len(ids)+1)
+	for _, id := range ids {
+		set[id] = true
+	}
+	if saved {
+		if _, err := a.store.PodcastRayByID(rayID); err != nil {
+			return BootstrapPayload{}, err
+		}
+		set[rayID] = true
+	} else {
+		delete(set, rayID)
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	raw, _ := json.Marshal(out)
+	if err := a.store.SetMeta(metaPodcastSavedRays, string(raw)); err != nil {
+		return BootstrapPayload{}, err
+	}
+	return a.Bootstrap(), nil
 }
 
 func visibleRayQueue(
@@ -778,6 +887,7 @@ func (a *App) GetSettings() SettingsPayload {
 	if value, err2 := a.store.GetMeta(metaNormalizePodcastVolume); err2 == nil {
 		payload.NormalizePodcastVolume = value == "1" || strings.EqualFold(value, "true")
 	}
+	payload.YtDlpPath = a.GetExternalMediaSettings().YtDlpPath
 	return payload
 }
 
@@ -965,7 +1075,17 @@ func (a *App) DoctorCheck(component string, payload SettingsPayload) deps.Check 
 func (a *App) DoctorRepair(component string, payload SettingsPayload) deps.RepairResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
-	return deps.RepairComponent(ctx, component, doctorSettings(payload))
+	result := deps.RepairComponent(ctx, component, doctorSettings(payload))
+	if result.Patch.YtDlpPath != "" {
+		settings := a.GetExternalMediaSettings()
+		settings.YtDlpPath = result.Patch.YtDlpPath
+		if err := a.SaveExternalMediaSettings(settings); err != nil {
+			result.Check.Status = deps.StatusRepairable
+			result.Check.Repairable = true
+			result.Check.Message = err.Error()
+		}
+	}
+	return result
 }
 
 func doctorSettings(payload SettingsPayload) deps.Settings {
@@ -975,6 +1095,7 @@ func doctorSettings(payload SettingsPayload) deps.Settings {
 		EssentiaModelDir: strings.TrimSpace(payload.EssentiaModelDir),
 		FFmpegPath:       strings.TrimSpace(payload.FFmpegPath),
 		FFprobePath:      strings.TrimSpace(payload.FFprobePath),
+		YtDlpPath:        strings.TrimSpace(payload.YtDlpPath),
 	}
 }
 
@@ -1724,6 +1845,98 @@ func podcastRayContains(ray podcast.Ray, itemID string) bool {
 
 func (a *App) SearchTracks(query string) []search.Result { return a.search.Query(query, 50) }
 
+func (a *App) SearchSuggestions(query, moodFilter string, limit int) []SearchSuggestion {
+	if limit <= 0 || limit > 5 {
+		limit = 5
+	}
+	hits := a.search.Query(query, 50)
+	normalizer := recommend.BuildFeatureNormalizer(a.library.AllTracks())
+	moodFilter = strings.TrimSpace(moodFilter)
+	out := make([]SearchSuggestion, 0, limit)
+	for _, hit := range hits {
+		track := hit.Track
+		label := ""
+		group := ""
+		analyzed := track.AnalyzedLevel >= 2 && strings.TrimSpace(track.AnalysisError) == ""
+		if analyzed {
+			label = emotion.Compute(track, normalizer).Basis.Label
+			group = searchMoodGroup(label)
+		}
+		if moodFilter != "" && group != moodFilter {
+			continue
+		}
+		out = append(out, SearchSuggestion{
+			Track: track, Score: hit.Score, Mood: label,
+			MoodGroup: group, Analyzed: analyzed,
+		})
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+func searchMoodGroup(label string) string {
+	switch label {
+	case "dirty_electro_combat", "combat_force", "tense_pressure":
+		return "combat"
+	case "serene_calm", "serene_bright", "serene_warm_groove":
+		return "serene"
+	case "night_smooth", "melancholy_grief", "melancholy_calm", "melancholy_pressure", "dramatic_arc":
+		return "night_smooth"
+	case "joy_party", "joy_funk", "uplift_drive", "street_swagger":
+		return "joy_party"
+	default:
+		return ""
+	}
+}
+
+func (a *App) SetMusicRaySaved(rayID string, saved bool) (BootstrapPayload, error) {
+	current := a.rays.CurrentRay()
+	if saved {
+		if _, err := a.rays.SaveSnapshot(rayID); err != nil {
+			return BootstrapPayload{}, err
+		}
+	} else if err := a.rays.UnsaveSnapshot(rayID); err != nil {
+		return BootstrapPayload{}, err
+	}
+	if current.ID != "" && current.ID != rayID {
+		_ = a.rays.LoadCurrent(current.ID)
+	}
+	a.pushSnapshot()
+	return a.Bootstrap(), nil
+}
+
+func (a *App) DeleteSavedMusicRay(rayID string) (BootstrapPayload, error) {
+	if err := a.rays.DeleteSaved(rayID); err != nil {
+		return BootstrapPayload{}, err
+	}
+	a.pushSnapshot()
+	return a.Bootstrap(), nil
+}
+
+func (a *App) ResumeSavedMusicRay(rayID string) (BootstrapPayload, error) {
+	ray, err := a.rays.ActivateSaved(rayID)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
+	track, ok := a.library.TrackByID(ray.CurrentTrackID)
+	if !ok {
+		return BootstrapPayload{}, fmt.Errorf("track not found: %s", ray.CurrentTrackID)
+	}
+	if err := a.playTrackSafe(track, true); err != nil {
+		return BootstrapPayload{}, err
+	}
+	if ray.PositionMs > 0 {
+		_ = a.audio.Seek(ray.PositionMs)
+	}
+	a.state.SetCurrent(track, ray.ID, ray.Queue, ray.PositionMs)
+	a.state.SetRaySeed(ray.SeedTrackID)
+	a.persistPlaybackSession(true)
+	a.pushSnapshot()
+	return a.Bootstrap(), nil
+}
+
 func (a *App) PlayTrack(trackID string) (BootstrapPayload, error) {
 	return a.PlayTrackWithMode(trackID, "")
 }
@@ -2364,18 +2577,21 @@ func (a *App) SetMusicRayContentMode(
 
 	contentMode := rays.NormalizeContentMode(mode)
 
-	seed, ok := a.library.TrackByID(
-		currentRay.SeedTrackID,
-	)
+	seedID := currentRay.CurrentTrackID
+	if seedID == "" {
+		seedID = currentRay.SeedTrackID
+	}
+	seed, ok := a.library.TrackByID(seedID)
 	if !ok {
 		return BootstrapPayload{}, fmt.Errorf(
 			"ray seed not found: %s",
-			currentRay.SeedTrackID,
+			seedID,
 		)
 	}
 
 	requestCtx, requestSeq := a.beginPlayRequest()
 	defer a.finishPlayRequest(requestSeq)
+	a.beginRayBuild(requestSeq, seed.ID)
 
 	items, err := a.rec.BuildRayWithModeContext(
 		requestCtx,
@@ -2385,6 +2601,7 @@ func (a *App) SetMusicRayContentMode(
 		string(contentMode),
 	)
 	if err != nil {
+		a.failRayBuild(requestSeq, seed.ID, err)
 		return BootstrapPayload{}, err
 	}
 	if !a.isCurrentPlayRequest(requestSeq) {
@@ -2397,6 +2614,7 @@ func (a *App) SetMusicRayContentMode(
 		items,
 	)
 	if err != nil {
+		a.failRayBuild(requestSeq, seed.ID, err)
 		return BootstrapPayload{}, err
 	}
 
@@ -2406,7 +2624,14 @@ func (a *App) SetMusicRayContentMode(
 		newRay.Queue...,
 	)
 	st.QueueLength = len(st.Queue)
+	st.QueueID = newRay.ID
+	st.RayID = newRay.ID
+	st.CurrentRayID = newRay.ID
+	st.RaySeedTrackID = newRay.SeedTrackID
+	st.QueueIndex = queueIndexByTrackID(st.Queue, st.CurrentTrackID)
 	a.state.Replace(st)
+	a.persistPlaybackSession(true)
+	a.finishRayBuild(requestSeq, seed.ID)
 	a.pushSnapshot()
 	return a.Bootstrap(), nil
 }
@@ -2820,6 +3045,16 @@ func (a *App) persistPlaybackSession(force bool) {
 
 		a.lastPodcastProgressAt = now
 		a.lastPodcastPositionMs = positionMs
+		playbackJSON, _ := json.Marshal(a.podcastPlayback)
+		if err := a.store.SavePlaybackSession(db.PlaybackSessionRow{
+			ID: "last", Status: string(st.Status), CurrentTrackID: st.CurrentTrackID,
+			CurrentPath: st.CurrentPath, PositionMs: positionMs, DurationMs: st.DurationMs,
+			QueueID: st.QueueID, QueueIndex: st.QueueIndex, RayID: st.CurrentRayID,
+			RaySeedTrackID: st.RaySeedTrackID, RayMode: "podcast",
+			RayConfigJSON: string(playbackJSON), UpdatedAt: time.Now().UnixMilli(), LastError: st.LastError,
+		}); err != nil {
+			appLog.W("persist podcast playback session failed: %v", err)
+		}
 		return
 	}
 
@@ -2862,6 +3097,7 @@ func (a *App) persistPlaybackSession(force bool) {
 		QueueJSON:      queueJSON,
 		RayID:          st.RayID,
 		RaySeedTrackID: st.RaySeedTrackID,
+		RayMode:        "music",
 		UpdatedAt:      time.Now().UnixMilli(),
 		LastError:      st.LastError,
 	})
@@ -2880,6 +3116,52 @@ func (a *App) restorePlaybackSession() {
 			Volume:     0.58,
 		})
 		return
+	}
+
+	if snap.RayMode == "podcast" && snap.CurrentTrackID != "" {
+		item, itemErr := a.podcasts.ItemByID(snap.CurrentTrackID)
+		if itemErr == nil {
+			if snap.RayID != "" {
+				if ray, rayErr := a.podcasts.OpenSavedRay(snap.RayID, item.ID); rayErr == nil {
+					a.syncPodcastPlaybackFromRay(ray)
+				}
+			}
+			track := podcast.AsTrack(item)
+			a.state.SetCurrent(track, snap.RayID, nil, snap.PositionMs)
+			st := a.state.Get()
+			st.Status = appstate.PlaybackPaused
+			st.QueueID = snap.QueueID
+			st.QueueIndex = snap.QueueIndex
+			st.RayID = snap.RayID
+			st.CurrentRayID = snap.RayID
+			st.RaySeedTrackID = snap.RaySeedTrackID
+			st.Playing = false
+			a.state.Replace(st)
+			return
+		}
+	}
+
+	if snap.RayMode == "podcast" && snap.CurrentTrackID != "" {
+		item, itemErr := a.podcasts.ItemByID(snap.CurrentTrackID)
+		if itemErr == nil {
+			if snap.RayID != "" {
+				if ray, rayErr := a.podcasts.OpenSavedRay(snap.RayID, item.ID); rayErr == nil {
+					a.syncPodcastPlaybackFromRay(ray)
+				}
+			}
+			track := podcast.AsTrack(item)
+			a.state.SetCurrent(track, snap.RayID, nil, snap.PositionMs)
+			st := a.state.Get()
+			st.Status = appstate.PlaybackPaused
+			st.QueueID = snap.QueueID
+			st.QueueIndex = snap.QueueIndex
+			st.RayID = snap.RayID
+			st.CurrentRayID = snap.RayID
+			st.RaySeedTrackID = snap.RaySeedTrackID
+			st.Playing = false
+			a.state.Replace(st)
+			return
+		}
 	}
 
 	if snap.CurrentTrackID == "" || strings.TrimSpace(snap.QueueJSON) == "" {

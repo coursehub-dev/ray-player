@@ -1,6 +1,7 @@
 package rays
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,14 +121,24 @@ type QueueItem struct {
 }
 
 type RaySummary struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	TrackCount       int    `json:"trackCount"`
-	CurrentTrackID   string `json:"currentTrackId"`
-	CurrentTrackName string `json:"currentTrackName"`
-	ResumeLabel      string `json:"resumeLabel"`
-	PositionMs       int    `json:"positionMs"`
-	Active           bool   `json:"active"`
+	ID               string      `json:"id"`
+	Name             string      `json:"name"`
+	TrackCount       int         `json:"trackCount"`
+	CurrentTrackID   string      `json:"currentTrackId"`
+	CurrentTrackName string      `json:"currentTrackName"`
+	ResumeLabel      string      `json:"resumeLabel"`
+	PositionMs       int         `json:"positionMs"`
+	Active           bool        `json:"active"`
+	ContentMode      ContentMode `json:"contentMode"`
+	SortMode         SortMode    `json:"sortMode"`
+	IsManualOrder    bool        `json:"isManualOrder"`
+	ParentRayID      string      `json:"parentRayId"`
+	Revision         int         `json:"revision"`
+	Kind             string      `json:"kind"`
+	SnapshotKey      string      `json:"snapshotKey"`
+	SavedAt          int64       `json:"savedAt"`
+	Saved            bool        `json:"saved"`
+	Items            []QueueItem `json:"items"`
 }
 
 type Ray struct {
@@ -145,6 +156,9 @@ type Ray struct {
 	ManualUpdatedAt int64       `json:"manualUpdatedAt"`
 	ParentRayID     string      `json:"parentRayId"`
 	Revision        int         `json:"revision"`
+	Kind            string      `json:"kind"`
+	SnapshotKey     string      `json:"snapshotKey"`
+	SavedAt         int64       `json:"savedAt"`
 }
 
 type PlaybackQueue struct {
@@ -154,6 +168,8 @@ type PlaybackQueue struct {
 	Index          int         `json:"index"`
 	RayID          string      `json:"rayId,omitempty"`
 	RaySeedTrackID string      `json:"raySeedTrackId,omitempty"`
+	ContentMode    ContentMode `json:"contentMode,omitempty"`
+	SortMode       SortMode    `json:"sortMode,omitempty"`
 	CreatedAt      int64       `json:"createdAt"`
 	UpdatedAt      int64       `json:"updatedAt"`
 }
@@ -174,7 +190,7 @@ func (s *Service) Activate(seed library.Track, queue []QueueItem) string {
 	queue = normalizedQueue(queue, seed.ID)
 	queue = s.hydrateQueue(queue)
 	queue = normalizeQueueMetadata(queue)
-	s.current = Ray{ID: id, Name: seed.Title, SeedTrackID: seed.ID, CurrentTrackID: seed.ID, Queue: append([]QueueItem{}, queue...), ResumeLabel: "продолжить с 0:00", PositionMs: 0}
+	s.current = Ray{ID: id, Name: seed.Title, SeedTrackID: seed.ID, CurrentTrackID: seed.ID, Queue: append([]QueueItem{}, queue...), ResumeLabel: "продолжить с 0:00", PositionMs: 0, ContentMode: ContentStable, SortMode: SortRecommended, Kind: "history", Revision: 1}
 	_ = s.persist(true)
 	return id
 }
@@ -183,12 +199,16 @@ func (s *Service) SeedHistory(seed library.Track, queue []QueueItem) {
 	queue = normalizedQueue(queue, seed.ID)
 	queue = s.hydrateQueue(queue)
 	queue = normalizeQueueMetadata(queue)
-	s.current = Ray{ID: fmt.Sprintf("ray-seed-%d", time.Now().UnixNano()), Name: seed.Title, SeedTrackID: seed.ID, CurrentTrackID: seed.ID, Queue: append([]QueueItem{}, queue...), ResumeLabel: "продолжить с 0:00", PositionMs: 0}
+	s.current = Ray{ID: fmt.Sprintf("ray-seed-%d", time.Now().UnixNano()), Name: seed.Title, SeedTrackID: seed.ID, CurrentTrackID: seed.ID, Queue: append([]QueueItem{}, queue...), ResumeLabel: "продолжить с 0:00", PositionMs: 0, ContentMode: ContentStable, SortMode: SortRecommended, Kind: "history", Revision: 1}
 	_ = s.persist(false)
 }
 
 func (s *Service) LoadCurrent(rayID string) bool {
 	if rayID == "" {
+		return false
+	}
+	header, err := s.store.RaySummaryByID(rayID)
+	if err != nil {
 		return false
 	}
 	rows, err := s.store.GetRayQueue(rayID)
@@ -199,15 +219,23 @@ func (s *Service) LoadCurrent(rayID string) bool {
 	if err != nil {
 		return false
 	}
-	s.current = Ray{ID: rayID, SeedTrackID: seedTrackID}
-	for _, summary := range s.Summaries() {
-		if summary.ID == rayID {
-			s.current.Name = summary.Name
-			s.current.ResumeLabel = summary.ResumeLabel
-			s.current.PositionMs = summary.PositionMs
-			break
-		}
+	s.current = Ray{
+		ID:             rayID,
+		Name:           header.Name,
+		SeedTrackID:    seedTrackID,
+		CurrentTrackID: header.CurrentTrackID,
+		ResumeLabel:    header.ResumeLabel,
+		PositionMs:     header.PositionMs,
+		ContentMode:    NormalizeContentMode(header.ContentMode),
+		SortMode:       NormalizeSortMode(header.SortMode),
+		IsManualOrder:  header.IsManualOrder,
+		ParentRayID:    header.ParentRayID,
+		Revision:       header.Revision,
+		Kind:           header.Kind,
+		SnapshotKey:    header.SnapshotKey,
+		SavedAt:        header.SavedAt,
 	}
+
 	for _, r := range rows {
 		s.current.Queue = append(s.current.Queue, QueueItem{
 			TrackID:       r.TrackID,
@@ -408,18 +436,27 @@ func (s *Service) ReplaceWithRebuiltRay(
 	mode ContentMode,
 	items []QueueItem,
 ) (Ray, error) {
+	currentTrackID := currentItemID(parent)
+	if currentTrackID == "" && len(items) > 0 {
+		currentTrackID = items[0].TrackID
+	}
+	items = normalizedQueue(items, currentTrackID)
 	ray := Ray{
 		ID: fmt.Sprintf(
 			"ray-%d",
 			time.Now().UnixNano(),
 		),
-		SeedTrackID: parent.SeedTrackID,
-		Name:        parent.Name,
-		ContentMode: mode,
-		SortMode:    SortRecommended,
-		ParentRayID: parent.ID,
-		Revision:    1,
-		Queue:       append([]QueueItem(nil), items...),
+		SeedTrackID:    currentTrackID,
+		Name:           parent.Name,
+		CurrentTrackID: currentTrackID,
+		ResumeLabel:    parent.ResumeLabel,
+		PositionMs:     parent.PositionMs,
+		ContentMode:    mode,
+		SortMode:       SortRecommended,
+		ParentRayID:    parent.ID,
+		Revision:       parent.Revision + 1,
+		Kind:           "history",
+		Queue:          append([]QueueItem(nil), items...),
 	}
 
 	for index := range ray.Queue {
@@ -444,6 +481,8 @@ func (s *Service) FrozenQueue() PlaybackQueue {
 		Index:          queueIndex(items, s.current.CurrentTrackID),
 		RayID:          s.current.ID,
 		RaySeedTrackID: s.current.SeedTrackID,
+		ContentMode:    s.current.ContentMode,
+		SortMode:       s.current.SortMode,
 		UpdatedAt:      time.Now().UnixMilli(),
 	}
 }
@@ -481,6 +520,9 @@ func (s *Service) RestoreFrozenQueue(raw string, currentTrackID string) error {
 		SeedTrackID:    queue.RaySeedTrackID,
 		CurrentTrackID: queue.Items[currentIndex].TrackID,
 		Queue:          queue.Items,
+		ContentMode:    NormalizeContentMode(string(queue.ContentMode)),
+		SortMode:       NormalizeSortMode(string(queue.SortMode)),
+		Kind:           "history",
 	}
 	return nil
 }
@@ -534,15 +576,108 @@ func (s *Service) jumpToIndex(index int) (QueueItem, bool) {
 }
 
 func (s *Service) Summaries() []RaySummary {
-	rows, err := s.store.ListRays()
+	return s.summariesByKind("history")
+}
+
+func (s *Service) SavedSummaries() []RaySummary {
+	return s.summariesByKind("saved")
+}
+
+func (s *Service) summariesByKind(kind string) []RaySummary {
+	rows, err := s.store.ListRays(kind)
 	if err != nil {
 		return nil
 	}
 	out := make([]RaySummary, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, RaySummary(r))
+		summary := RaySummary{
+			ID: r.ID, Name: r.Name, TrackCount: r.TrackCount,
+			CurrentTrackID: r.CurrentTrackID, CurrentTrackName: r.CurrentTrackName,
+			ResumeLabel: r.ResumeLabel, PositionMs: r.PositionMs, Active: r.Active,
+			ContentMode: NormalizeContentMode(r.ContentMode), SortMode: NormalizeSortMode(r.SortMode),
+			IsManualOrder: r.IsManualOrder, ParentRayID: r.ParentRayID, Revision: r.Revision,
+			Kind: r.Kind, SnapshotKey: r.SnapshotKey, SavedAt: r.SavedAt, Saved: r.Saved,
+		}
+		if queue, queueErr := s.store.GetRayQueue(r.ID); queueErr == nil {
+			for _, item := range queue {
+				summary.Items = append(summary.Items, QueueItem{
+					TrackID: item.TrackID, Title: item.Title, Subtitle: item.Subtitle,
+					Artist: item.Artist, Album: item.Album, GenrePrimary: item.GenrePrimary,
+					GenreLabel: item.GenreLabel, GenreDetail: item.GenreDetail,
+					GenreTags: item.GenreTags, DurationMs: item.DurationMs,
+					DurationLabel: item.DurationLabel, Position: item.PositionIndex,
+					OriginalPosition: item.PositionIndex, IsCurrent: item.IsCurrent,
+					Reason: item.Reason, RayReason: item.Reason,
+					Bucket: item.Bucket, Strategy: item.Strategy, Score: item.Score,
+				})
+			}
+			summary.Items = normalizeQueueMetadata(s.hydrateQueue(summary.Items))
+		}
+		out = append(out, summary)
 	}
 	return out
+}
+
+func snapshotKey(ray Ray) string {
+	parts := []string{
+		string(NormalizeContentMode(string(ray.ContentMode))),
+		string(NormalizeSortMode(string(ray.SortMode))),
+	}
+	for _, item := range ray.Queue {
+		parts = append(parts, item.TrackID)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func (s *Service) SaveSnapshot(rayID string) (string, error) {
+	if !s.LoadCurrent(rayID) {
+		return "", fmt.Errorf("ray not found: %s", rayID)
+	}
+	key := snapshotKey(s.current)
+	if err := s.store.SetRaySnapshotKey(s.current.ID, key); err != nil {
+		return "", err
+	}
+	destID := fmt.Sprintf("saved-%x", sha256.Sum256([]byte(key)))[:30]
+	return s.store.CloneRaySnapshot(s.current.ID, destID, key)
+}
+
+func (s *Service) UnsaveSnapshot(rayID string) error {
+	header, err := s.store.RaySummaryByID(rayID)
+	if err != nil {
+		return err
+	}
+	key := header.SnapshotKey
+	if key == "" {
+		if !s.LoadCurrent(rayID) {
+			return fmt.Errorf("ray not found: %s", rayID)
+		}
+		key = snapshotKey(s.current)
+	}
+	return s.store.DeleteSavedRayBySnapshotKey(key)
+}
+
+func (s *Service) DeleteSaved(id string) error {
+	return s.store.DeleteSavedRay(id)
+}
+
+func (s *Service) ActivateSaved(id string) (Ray, error) {
+	if !s.LoadCurrent(id) || s.current.Kind != "saved" {
+		return Ray{}, fmt.Errorf("saved ray not found: %s", id)
+	}
+	source := cloneRay(s.current)
+	source.ID = fmt.Sprintf("ray-%d", time.Now().UnixNano())
+	source.Kind = "history"
+	source.ParentRayID = id
+	source.SavedAt = 0
+	source.SnapshotKey = snapshotKey(source)
+	s.mu.Lock()
+	s.current = source
+	s.mu.Unlock()
+	if err := s.persist(true); err != nil {
+		return Ray{}, err
+	}
+	return cloneRay(source), nil
 }
 
 func (s *Service) Resume(rayID string) (Ray, bool) {
@@ -685,6 +820,13 @@ func (s *Service) persist(active bool) error {
 		name = s.current.Queue[0].Title
 	}
 	if err := s.store.SaveRay(s.current.ID, name, seedID, s.current.CurrentTrackID, s.current.ResumeLabel, s.current.PositionMs, active, rows); err != nil {
+		return err
+	}
+	if s.current.Kind == "" {
+		s.current.Kind = "history"
+	}
+	s.current.SnapshotKey = snapshotKey(s.current)
+	if err := s.store.SetRaySnapshotKey(s.current.ID, s.current.SnapshotKey); err != nil {
 		return err
 	}
 	return s.store.SaveRayState(

@@ -33,6 +33,9 @@ export let volumeIconLevel: "muted" | "low" | "medium" | "high" = "medium";
 export let volumeMuteBusy = false;
 export let displayedVolume = 0.58;
 export let accentReactive = false;
+export let compact = false;
+export let resumeSession: any = null;
+export let canOpenRay = false;
 
 const dispatch = createEventDispatcher<{
 	repeat: void;
@@ -44,6 +47,8 @@ const dispatch = createEventDispatcher<{
 	mute: void;
 	volumePreview: number;
 	volumeCommit: number;
+	compact: void;
+	openRay: void;
 }>();
 </script>
 
@@ -60,6 +65,11 @@ const dispatch = createEventDispatcher<{
 				{/if}
 				{#if !playingPodcast && playbackCurrentGenre}
 					<small>{playbackCurrentGenre}</small>
+				{/if}
+				{#if resumeSession?.available && canOpenRay}
+					<button type="button" class="continue-chip" on:click={() => dispatch("openRay")}>
+						{resumeSession.title || "Открыть луч"} · {resumeSession.position || "0:00"}
+					</button>
 				{/if}
 				{#if playbackStatus === "error" && playbackLastError}
 					<small class="player-error">
@@ -132,6 +142,15 @@ const dispatch = createEventDispatcher<{
 		</div>
 
 		<div class="player-side">
+			<button
+				type="button"
+				class="min-player-toggle"
+				class:active={compact}
+				title={compact ? "Развернуть" : "Свернуть"}
+				on:click={() => dispatch("compact")}
+			>
+				min
+			</button>
 			<button
 				type="button"
 				class="volume-icon-button"

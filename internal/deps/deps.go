@@ -45,6 +45,7 @@ type Settings struct {
 	EssentiaModelDir string `json:"essentiaModelDir"`
 	FFmpegPath       string `json:"ffmpegPath"`
 	FFprobePath      string `json:"ffprobePath"`
+	YtDlpPath        string `json:"ytDlpPath"`
 }
 
 type Check struct {
@@ -62,6 +63,7 @@ type SettingsPatch struct {
 	EssentiaModelDir string `json:"essentiaModelDir,omitempty"`
 	FFmpegPath       string `json:"ffmpegPath,omitempty"`
 	FFprobePath      string `json:"ffprobePath,omitempty"`
+	YtDlpPath        string `json:"ytDlpPath,omitempty"`
 }
 
 type RepairResult struct {
@@ -90,6 +92,8 @@ func CheckComponent(ctx context.Context, id string, cfg Settings) Check {
 		return checkStorage()
 	case "ffmpeg":
 		return checkFFmpeg(ctx, cfg)
+	case "ytdlp":
+		return checkYtDlp(ctx, cfg)
 	case "onnxruntime":
 		return checkONNXRuntime(cfg)
 	case "minilm":
@@ -110,6 +114,8 @@ func RepairComponent(ctx context.Context, id string, cfg Settings) RepairResult 
 	switch strings.TrimSpace(strings.ToLower(id)) {
 	case "ffmpeg":
 		patch.FFmpegPath, patch.FFprobePath, err = EnsureFFmpeg(ctx)
+	case "ytdlp":
+		patch.YtDlpPath, err = EnsureYtDlp(ctx)
 	case "onnxruntime":
 		patch.ONNXRuntimePath, err = EnsureONNXRuntime(ctx)
 	case "minilm":
@@ -133,6 +139,8 @@ func componentTitle(id string) string {
 		return "Папка данных и ассетов"
 	case "ffmpeg":
 		return "FFmpeg / ffprobe"
+	case "ytdlp":
+		return "yt-dlp"
 	case "onnxruntime":
 		return "ONNX Runtime"
 	case "minilm":
@@ -160,7 +168,74 @@ func applyPatch(cfg Settings, patch SettingsPatch) Settings {
 	if patch.FFprobePath != "" {
 		cfg.FFprobePath = patch.FFprobePath
 	}
+	if patch.YtDlpPath != "" {
+		cfg.YtDlpPath = patch.YtDlpPath
+	}
 	return cfg
+}
+
+func checkYtDlp(ctx context.Context, cfg Settings) Check {
+	path, err := ResolveYtDlp(cfg.YtDlpPath)
+	if err != nil {
+		return Check{ID: "ytdlp", Title: componentTitle("ytdlp"), Status: StatusRepairable, Repairable: true, Message: err.Error()}
+	}
+	if err := runVersion(ctx, path, "--version"); err != nil {
+		return Check{ID: "ytdlp", Title: componentTitle("ytdlp"), Status: StatusRepairable, Repairable: true, Message: "yt-dlp не запускается: " + err.Error(), Path: path}
+	}
+	return Check{ID: "ytdlp", Title: componentTitle("ytdlp"), Status: StatusReady, Message: "yt-dlp доступен", Path: path}
+}
+
+func ResolveYtDlp(configured string) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured != "" && !isCommandDefault(configured, "yt-dlp") {
+		return resolveExecutable(configured)
+	}
+	if path, err := exec.LookPath("yt-dlp"); err == nil {
+		return path, nil
+	}
+	dir, err := appdirs.ManagedYtDlpDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, executableName("yt-dlp"))
+	if regularFile(path) {
+		return path, nil
+	}
+	return "", errors.New("yt-dlp не найден")
+}
+
+func EnsureYtDlp(ctx context.Context) (string, error) {
+	if path, err := ResolveYtDlp(""); err == nil && runVersion(ctx, path, "--version") == nil {
+		return path, nil
+	}
+	dir, err := appdirs.ManagedYtDlpDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := executableName("yt-dlp")
+	url := "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+	if runtime.GOOS == "windows" {
+		url += ".exe"
+	} else if runtime.GOOS == "darwin" {
+		url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+	}
+	dst := filepath.Join(dir, name)
+	if err := downloadFile(ctx, url, dst); err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dst, 0o755); err != nil {
+			return "", err
+		}
+	}
+	if err := runVersion(ctx, dst, "--version"); err != nil {
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("downloaded yt-dlp failed smoke-test: %w", err)
+	}
+	return dst, nil
 }
 
 func checkStorage() Check {

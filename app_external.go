@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	metaYtDlpPath        = "external.ytdlp_path"
-	metaYtDlpDownloadDir = "external.ytdlp_download_dir"
-	metaFFmpegPath       = "external.ffmpeg_path"
+	metaYtDlpPath          = "external.ytdlp_path"
+	metaYtDlpDownloadDir   = "external.ytdlp_download_dir"
+	metaMusicDownloadDir   = "external.music_download_dir"
+	metaPodcastDownloadDir = "external.podcast_download_dir"
+	metaFFmpegPath         = "external.ffmpeg_path"
 )
 
 func (a *App) GetExternalMediaSettings() externalmedia.Settings {
@@ -33,8 +35,21 @@ func (a *App) GetExternalMediaSettings() externalmedia.Settings {
 		strings.TrimSpace(value) != "" {
 		settings.YtDlpPath = value
 	}
+	legacyDownloadDir := ""
 	if value, err := a.store.GetMeta(metaYtDlpDownloadDir); err == nil {
-		settings.YtDlpDownloadDir = value
+		legacyDownloadDir = strings.TrimSpace(value)
+	}
+	if value, err := a.store.GetMeta(metaMusicDownloadDir); err == nil {
+		settings.MusicDownloadDir = strings.TrimSpace(value)
+	}
+	if value, err := a.store.GetMeta(metaPodcastDownloadDir); err == nil {
+		settings.PodcastDownloadDir = strings.TrimSpace(value)
+	}
+	if settings.MusicDownloadDir == "" && legacyDownloadDir != "" {
+		settings.MusicDownloadDir = filepath.Join(legacyDownloadDir, "RayPlayer", "yt-dlp", "music")
+	}
+	if settings.PodcastDownloadDir == "" && legacyDownloadDir != "" {
+		settings.PodcastDownloadDir = filepath.Join(legacyDownloadDir, "RayPlayer", "yt-dlp", "podcasts")
 	}
 	if value, err := a.store.GetMeta(metaFFmpegPath); err == nil {
 		settings.FFmpegPath = value
@@ -62,9 +77,12 @@ func (a *App) SaveExternalMediaSettings(
 		return err
 	}
 	if err := a.store.SetMeta(
-		metaYtDlpDownloadDir,
-		strings.TrimSpace(settings.YtDlpDownloadDir),
+		metaMusicDownloadDir,
+		strings.TrimSpace(settings.MusicDownloadDir),
 	); err != nil {
+		return err
+	}
+	if err := a.store.SetMeta(metaPodcastDownloadDir, strings.TrimSpace(settings.PodcastDownloadDir)); err != nil {
 		return err
 	}
 	return a.store.SetMeta(
@@ -323,3 +341,16 @@ func externalItemID(
 var errExternalWorkerUnavailable = errors.New(
 	"external download worker is unavailable",
 )
+
+func (a *App) ListExternalDownloadJobs(limit int) []externalmedia.JobDTO {
+	jobs, err := a.store.ListExternalDownloadJobs(limit)
+	if err != nil {
+		appLog.W("list external jobs failed: %v", err)
+		return nil
+	}
+	out := make([]externalmedia.JobDTO, 0, len(jobs))
+	for _, job := range jobs {
+		out = append(out, job.DTO())
+	}
+	return out
+}

@@ -32,6 +32,8 @@ export function DebugReindexLibrary():Promise<main.DebugReindexResult>;
 
 export function DeleteExternalItem(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
+export function DeleteSavedMusicRay(arg1:string):Promise<main.BootstrapPayload>;
+
 export function DoctorCheck(arg1:string,arg2:main.SettingsPayload):Promise<deps.Check>;
 
 export function DoctorRepair(arg1:string,arg2:main.SettingsPayload):Promise<deps.RepairResult>;
@@ -49,6 +51,8 @@ export function GetSettings():Promise<main.SettingsPayload>;
 export function ImportPaths(arg1:Array<string>):Promise<library.ImportSummary>;
 
 export function ImportPodcastPaths(arg1:Array<string>):Promise<podcast.ImportResult>;
+
+export function ListExternalDownloadJobs(arg1:number):Promise<Array<externalmedia.JobDTO>>;
 
 export function MovePodcastRayItem(arg1:number,arg2:number):Promise<main.BootstrapPayload>;
 
@@ -82,6 +86,8 @@ export function RemovePodcastRayItem(arg1:string):Promise<main.BootstrapPayload>
 
 export function ResumeRay(arg1:string):Promise<main.BootstrapPayload>;
 
+export function ResumeSavedMusicRay(arg1:string):Promise<main.BootstrapPayload>;
+
 export function RetryExternalDownload(arg1:string):Promise<void>;
 
 export function RunReclusterSingleflight():Promise<void>;
@@ -94,17 +100,25 @@ export function ScheduleRecluster():Promise<void>;
 
 export function SearchPodcasts(arg1:string):Promise<Array<podcast.Item>>;
 
+export function SearchSuggestions(arg1:string,arg2:string,arg3:number):Promise<Array<main.SearchSuggestion>>;
+
 export function SearchTracks(arg1:string):Promise<Array<search.Result>>;
 
 export function Seek(arg1:number):Promise<appstate.PlayerState>;
 
+export function SetLibraryMode(arg1:string):Promise<main.BootstrapPayload>;
+
 export function SetMusicRayContentMode(arg1:string):Promise<main.BootstrapPayload>;
+
+export function SetMusicRaySaved(arg1:string,arg2:boolean):Promise<main.BootstrapPayload>;
 
 export function SetMusicRaySortMode(arg1:string):Promise<main.BootstrapPayload>;
 
 export function SetNormalizePodcastVolume(arg1:boolean):Promise<main.SettingsPayload>;
 
 export function SetPodcastRayContentMode(arg1:string):Promise<main.BootstrapPayload>;
+
+export function SetPodcastRaySaved(arg1:string,arg2:boolean):Promise<main.BootstrapPayload>;
 
 export function SetPodcastRaySortMode(arg1:string):Promise<main.BootstrapPayload>;
 

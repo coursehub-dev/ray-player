@@ -1,4 +1,4 @@
-export type DoctorRowId = "storage" | "ffmpeg" | "onnxruntime" | "minilm" | "essentia";
+export type DoctorRowId = "storage" | "ffmpeg" | "ytdlp" | "onnxruntime" | "minilm" | "essentia";
 
 export type DoctorRow = {
 	id: DoctorRowId | string;
@@ -12,6 +12,7 @@ export type DoctorRow = {
 export const doctorRows = Object.freeze([
 	{ id: "storage", title: "Папка данных и ассетов" },
 	{ id: "ffmpeg", title: "FFmpeg / ffprobe" },
+	{ id: "ytdlp", title: "yt-dlp" },
 	{ id: "onnxruntime", title: "ONNX Runtime" },
 	{ id: "minilm", title: "MiniLM" },
 	{ id: "essentia", title: "Essentia models" },
@@ -41,6 +42,7 @@ export const mergeDoctorPatch = (
 	...(patch.essentiaModelDir ? { essentiaModelDir: patch.essentiaModelDir } : {}),
 	...(patch.ffmpegPath ? { ffmpegPath: patch.ffmpegPath } : {}),
 	...(patch.ffprobePath ? { ffprobePath: patch.ffprobePath } : {}),
+	...(patch.ytDlpPath ? { ytDlpPath: patch.ytDlpPath } : {}),
 });
 
 export const doctorStatusLabel = (row: { status?: string } | null | undefined): string => {

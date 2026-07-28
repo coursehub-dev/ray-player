@@ -58,6 +58,14 @@ func ManagedEssentiaDir() (string, error) {
 	return filepath.Join(root, "runtime", "models", "essentia"), nil
 }
 
+func ManagedYtDlpDir() (string, error) {
+	root, err := AssetsRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "bin", runtime.GOOS+"-"+runtime.GOARCH, "yt-dlp"), nil
+}
+
 func ManagedMiniLMDir() (string, error) {
 	root, err := AssetsRoot()
 	if err != nil {

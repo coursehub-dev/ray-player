@@ -566,6 +566,51 @@ func formatDurationMs(durationMs int) string {
 	return fmt.Sprintf("%d:%02d", minutes, seconds)
 }
 
+func (s *Store) ListExternalDownloadJobs(limit int) ([]externalmedia.Job, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			id, library_type, item_id, url, source_site, external_id,
+			status, progress, title, uploader, duration, thumbnail_url,
+			output_path, temp_path, bitrate, attempts, max_attempts,
+			error, created_at, updated_at, started_at, finished_at
+		FROM external_download_jobs
+		ORDER BY
+			CASE status
+				WHEN 'downloading' THEN 0
+				WHEN 'converting' THEN 1
+				WHEN 'queued' THEN 2
+				WHEN 'error' THEN 3
+				ELSE 4
+			END,
+			updated_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	jobs := make([]externalmedia.Job, 0, limit)
+	for rows.Next() {
+		var job externalmedia.Job
+		if err := rows.Scan(
+			&job.ID, &job.LibraryType, &job.ItemID, &job.URL,
+			&job.SourceSite, &job.ExternalID, &job.Status, &job.Progress,
+			&job.Title, &job.Uploader, &job.Duration, &job.ThumbnailURL,
+			&job.OutputPath, &job.TempPath, &job.Bitrate, &job.Attempts,
+			&job.MaxAttempts, &job.Error, &job.CreatedAt, &job.UpdatedAt,
+			&job.StartedAt, &job.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func osStat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }

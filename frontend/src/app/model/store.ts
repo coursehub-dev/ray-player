@@ -20,11 +20,15 @@ const initialSnapshot: AppSnapshot = {
 	podcastPlayback: { itemId: "", rayId: "", queueIndex: -1, queueLength: 0 },
 	podcastHistory: [],
 	podcastRays: [],
+	savedPodcastRayIds: [],
 	current: { volume: 0.58, queue: [] },
 	history: [],
 	rays: [],
+	savedRays: [],
 	queue: [],
 	libraryStat: { tracks: 0 },
+	libraryMode: "music",
+	resumeSession: { available: false },
 };
 
 export const screen = writable("search");

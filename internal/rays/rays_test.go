@@ -256,3 +256,36 @@ func TestManualMoveDoesNotChangeContentMode(t *testing.T) {
 		)
 	}
 }
+
+func TestSnapshotKeyDependsOnOrderAndProgram(t *testing.T) {
+	base := Ray{
+		ContentMode: ContentStable,
+		SortMode:    SortRecommended,
+		Queue:       []QueueItem{{TrackID: "a"}, {TrackID: "b"}},
+	}
+	ordered := base
+	ordered.Queue = []QueueItem{{TrackID: "b"}, {TrackID: "a"}}
+	warm := base
+	warm.ContentMode = ContentWarmUp
+
+	if snapshotKey(base) == snapshotKey(ordered) {
+		t.Fatal("snapshot key must include exact queue order")
+	}
+	if snapshotKey(base) == snapshotKey(warm) {
+		t.Fatal("snapshot key must include content program")
+	}
+}
+
+func TestReplaceWithRebuiltRayKeepsCurrentPointer(t *testing.T) {
+	parent := Ray{
+		ID: "old", SeedTrackID: "seed", CurrentTrackID: "current",
+		PositionMs: 42000, ResumeLabel: "продолжить с 0:42", Revision: 3,
+	}
+	items := []QueueItem{{TrackID: "current"}, {TrackID: "next"}}
+	// persist требует store, поэтому проверяем нормализацию напрямую через ожидаемую
+	// структуру до persistence в отдельном store-backed test; здесь фиксируем контракт.
+	items = normalizedQueue(items, parent.CurrentTrackID)
+	if !items[0].IsCurrent {
+		t.Fatal("rebuilt queue must retain current track")
+	}
+}

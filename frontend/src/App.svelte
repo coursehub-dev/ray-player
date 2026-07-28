@@ -20,8 +20,10 @@ import { AddLinkModal, externalDownloads, mergedDownloadState, putExternalDownlo
 import { DoctorModal } from "./pages/settings";
 import { AppLayout } from "./widgets/app-layout";
 import { PlayerBar } from "./widgets/player-bar";
+import { GlobalSearch } from "./widgets/global-search";
+import { TasksModal } from "./widgets/tasks-modal";
 import { SearchPage } from "./pages/search";
-import { HistoryPage } from "./pages/history";
+
 import { RayPage } from "./pages/ray";
 import { RaysPage } from "./pages/rays";
 import {
@@ -71,7 +73,14 @@ import {
 	resolvePlayerTitle,
 	resolveVisualMode,
 } from "./entities/playback";
-import { Search, History, FolderPlus, FilePlus2, ListMusic, X, Mic, Music2, Link, Stethoscope } from "@lucide/svelte";
+import { Search, Bookmark, FolderPlus, FilePlus2, ListMusic, X, Mic, Music2, Link, Stethoscope } from "@lucide/svelte";
+import {
+	WindowGetPosition,
+	WindowGetSize,
+	WindowSetMinSize,
+	WindowSetPosition,
+	WindowSetSize,
+} from "../wailsjs/runtime/runtime";
 
 let appState = {
 	library: [],
@@ -174,6 +183,7 @@ const defaultMusicAccentStyle = [
 
 let showSettings = false;
 let showDoctor = false;
+let showTasks = false;
 let showAdvanced = false;
 let dragDepth = 0;
 let isDragging = false;
@@ -201,7 +211,6 @@ let runtimeTestResult = null;
 let miniLMTestResult = null;
 let essentiaTestResult = null;
 let ffmpegTestResult = null;
-let selectedRayMode = "";
 let showInsight = false;
 let auditRows = [];
 let addLinkOpen = false;
@@ -210,8 +219,16 @@ let addLinkError = "";
 let externalSettings = {
 	ytDlpPath: "yt-dlp",
 	ffmpegPath: "",
-	ytDlpDownloadDir: "",
+	musicDownloadDir: "",
+	podcastDownloadDir: "",
 };
+let globalSuggestions = [];
+let globalSearchFocused = false;
+let moodFilter = "";
+let suggestionToken = 0;
+let tasks = [];
+let compactMode = false;
+let restoreWindow = null;
 let ytDlpCheck = null;
 let ytDlpChecking = false;
 let externalSettingsSaving = false;
@@ -287,9 +304,10 @@ const setLibraryMode = async (mode) => {
 
 	modeSwitchBusy = true;
 	try {
-		const keepScreen = currentScreen === "history" || currentScreen === "rays";
+		const keepScreen = currentScreen === "saved" || currentScreen === "rays";
 
 		libraryMode = mode;
+		await syncPayload(Promise.resolve(api.setLibraryMode(mode)));
 		query = "";
 		if (!keepScreen) {
 			setScreen("search");
@@ -570,6 +588,7 @@ onMount(async () => {
 	await bootstrap();
 
 	appState = $state;
+	libraryMode = appState.libraryMode === "podcast" ? "podcast" : "music";
 	podcastResults = appState.podcasts || [];
 
 	await runSearch("");
@@ -664,7 +683,7 @@ const startNewRayFromMenu = async () => {
 	const trackId = contextMenu?.trackId;
 	closeTrackMenu();
 	if (!trackId) return;
-	await playTrackStartingRay(trackId, selectedRayMode);
+	await playTrackStartingRay(trackId, appState.musicRay?.contentMode || "stable");
 	await refreshAudit(trackId);
 	setScreen("ray");
 };
@@ -703,7 +722,7 @@ const playOrToggle = async (trackId, targetScreen = null) => {
 	}
 
 	try {
-		const payload = await playTrackBuildingRay(trackId, selectedRayMode);
+		const payload = await playTrackBuildingRay(trackId, appState.musicRay?.contentMode || "stable");
 
 		if (requestSeq !== libraryPlayRequestSeq) {
 			return;
@@ -725,7 +744,7 @@ const refreshAudit = async (trackId = appState.current?.currentTrackId) => {
 		auditRows = [];
 		return;
 	}
-	const audit = await api.rayAudit(trackId, selectedRayMode, 12);
+	const audit = await api.rayAudit(trackId, appState.musicRay?.contentMode || "stable", 12);
 	auditRows = audit?.rows || [];
 };
 
@@ -741,6 +760,99 @@ const resumeRay = async (rayId) => {
 	await resumeMusicRay(rayId);
 	setScreen("ray");
 };
+
+const resumeSavedRay = async (rayId) => {
+	await syncPayload(Promise.resolve(api.resumeSavedMusicRay(rayId)));
+	setScreen("ray");
+};
+
+const toggleMusicSaved = async (rayId, saved) => {
+	await syncPayload(Promise.resolve(api.setMusicRaySaved(rayId, saved)));
+};
+
+const deleteSavedMusicRay = async (rayId) => {
+	await syncPayload(Promise.resolve(api.deleteSavedMusicRay(rayId)));
+};
+
+const togglePodcastSaved = async (rayId, saved) => {
+	await syncPayload(Promise.resolve(api.setPodcastRaySaved(rayId, saved)));
+};
+
+$: currentMusicRaySaved =
+	Boolean(appState.musicRay?.snapshotKey) &&
+	(appState.savedRays || []).some((ray) => ray.snapshotKey === appState.musicRay.snapshotKey);
+$: currentPodcastRaySaved =
+	Boolean(appState.podcastRay?.id) && (appState.savedPodcastRayIds || []).includes(appState.podcastRay.id);
+
+const toggleCurrentRaySaved = async () => {
+	if (libraryMode === "podcast") {
+		if (!appState.podcastRay?.id) return;
+		await togglePodcastSaved(appState.podcastRay.id, !currentPodcastRaySaved);
+		return;
+	}
+	if (!appState.musicRay?.id) return;
+	await toggleMusicSaved(appState.musicRay.id, !currentMusicRaySaved);
+};
+
+const refreshSuggestions = async () => {
+	const token = ++suggestionToken;
+	if (libraryMode === "podcast") {
+		globalSuggestions = (podcastResults || []).slice(0, 5).map((item) => ({ track: item, podcast: true }));
+		return;
+	}
+	const next = await api.searchSuggestions(query, moodFilter, 5);
+	if (token === suggestionToken) globalSuggestions = Array.isArray(next) ? next : [];
+};
+
+const globalSearchInput = async (value) => {
+	await searchCurrentLibrary(value);
+	await refreshSuggestions();
+};
+
+const selectMood = async (value) => {
+	moodFilter = value;
+	await refreshSuggestions();
+};
+
+const startSuggestion = async (item) => {
+	globalSearchFocused = false;
+	if (item.podcast) {
+		await togglePodcastRow(item.track.id, false);
+		return;
+	}
+	await playOrToggle(item.track.id, "ray");
+};
+
+const refreshTasks = async () => {
+	const rows = await api.listExternalDownloadJobs(50);
+	tasks = Array.isArray(rows) ? rows : [];
+};
+
+const openTasks = async () => {
+	await refreshTasks();
+	showTasks = true;
+};
+
+$: activeTaskCount =
+	tasks.filter((job) => ["queued", "downloading", "converting", "fetching_metadata"].includes(job.status)).length +
+	($reindexStatus.active ? 1 : 0);
+
+const toggleCompact = async () => {
+	if (!compactMode) {
+		restoreWindow = { size: await WindowGetSize(), position: await WindowGetPosition() };
+		WindowSetMinSize(480, 108);
+		WindowSetSize(560, 124);
+		compactMode = true;
+		return;
+	}
+	compactMode = false;
+	WindowSetMinSize(980, 720);
+	if (restoreWindow?.size) WindowSetSize(restoreWindow.size.w, restoreWindow.size.h);
+	if (restoreWindow?.position) WindowSetPosition(restoreWindow.position.x, restoreWindow.position.y);
+	restoreWindow = null;
+};
+
+const openCurrentRay = () => setScreen("ray");
 const addFolder = async () => {
 	await syncPayload(libraryMode === "podcast" ? api.addPodcastFolder() : api.addFolder());
 	if (libraryMode === "podcast") {
@@ -778,6 +890,7 @@ const openSettings = async () => {
 		...(settingsPayload.emoFlowUi || {}),
 	};
 	externalSettings = await api.getExternalMediaSettings();
+	settingsPayload.ytDlpPath = externalSettings.ytDlpPath;
 	ytDlpCheck = null;
 	runtimeTestResult = null;
 	miniLMTestResult = null;
@@ -821,7 +934,11 @@ const applyDoctorPatch = (patch) => {
 		...(patch?.miniLMModelDir ? { miniLMModelDir: patch.miniLMModelDir } : {}),
 		...(patch?.ffmpegPath ? { ffmpegPath: patch.ffmpegPath } : {}),
 		...(patch?.ffprobePath ? { ffprobePath: patch.ffprobePath } : {}),
+		...(patch?.ytDlpPath ? { ytDlpPath: patch.ytDlpPath } : {}),
 	};
+	if (patch?.ytDlpPath) {
+		externalSettings = { ...externalSettings, ytDlpPath: patch.ytDlpPath };
+	}
 	runtimeTestResult = null;
 	miniLMTestResult = null;
 	essentiaTestResult = null;
@@ -1390,8 +1507,8 @@ $: playerSubline = playingPodcast
 
 <AppLayout
 	indexing={$indexingState.isIndexing}
-	{visualMode}
-	shellStyle={appShellStyle}
+	{visualMode}		shellStyle={appShellStyle}
+		compact={compactMode}
 >
 	<div slot="sidebar">
 		<div class="brand">
@@ -1443,13 +1560,12 @@ $: playerSubline = playingPodcast
 					class="nav-btn"
 					on:click={() => setScreen("search")}
 					><span class="nav-icon"><Search size={16} strokeWidth={1.8} /></span><span>Поиск</span></button
-				>
-				<button
-					class:active={currentScreen === "history"}
-					class="nav-btn"
-					on:click={() => setScreen("history")}
-					><span class="nav-icon"><History size={16} strokeWidth={1.8} /></span><span>История</span><small class="nav-count">{libraryMode === "podcast" ? (appState.podcastHistory || []).length : (appState.history || []).length}</small></button
-				>
+				>					<button
+						class:active={currentScreen === "saved"}
+						class="nav-btn"
+						on:click={() => setScreen("saved")}
+						><span class="nav-icon"><Bookmark size={16} strokeWidth={1.8} /></span><span>Сохранённое</span><small class="nav-count">{libraryMode === "podcast" ? (appState.savedPodcastRayIds || []).length : (appState.savedRays || []).length}</small></button
+					>
 				<button
 					class:active={currentScreen === "rays"}
 					class="nav-btn"
@@ -1481,6 +1597,24 @@ $: playerSubline = playingPodcast
 	</div>
 
 	<div slot="main">
+		<div class="main-stack">
+			<GlobalSearch
+				{libraryMode}
+				{query}
+				{moodFilter}
+				suggestions={globalSuggestions}
+				focused={globalSearchFocused}
+				taskCount={activeTaskCount}
+				bind:inputEl={searchInputEl}
+				onInput={globalSearchInput}
+				onFocus={() => { globalSearchFocused = true; void refreshSuggestions(); }}
+				onBlur={() => setTimeout(() => (globalSearchFocused = false), 100)}
+				onMood={selectMood}
+				onStart={startSuggestion}
+				{openTasks}
+				{openSettings}
+			/>
+			<div class="route-stack">
 		{#if currentScreen === "search"}
 			<SearchPage
 				{libraryMode}
@@ -1512,24 +1646,6 @@ $: playerSubline = playingPodcast
 			/>
 		{/if}
 
-		{#if currentScreen === "history"}
-			<HistoryPage
-				{libraryMode}
-				{appState}
-				playback={$playbackState}
-				indexing={$indexingState}
-				{openSettings}
-				{playPodcastHistoryItem}
-				{playOrToggle}
-				{openTrackMenu}
-				{podcastMeta}
-				{podcastHistorySourceLabel}
-				{rowCurrent}
-				{rowIcon}
-				{rowRaySeed}
-			/>
-		{/if}
-
 		{#if currentScreen === "ray"}
 			<RayPage
 				{libraryMode}
@@ -1538,7 +1654,6 @@ $: playerSubline = playingPodcast
 				indexing={$indexingState}
 				{currentTrack}
 				{rayBuild}
-				bind:selectedRayMode
 				{showInsight}
 				{auditRows}
 				{emoFlowDirectionLabel}
@@ -1585,10 +1700,32 @@ $: playerSubline = playingPodcast
 				{openSettings}
 				{openPodcastRayHistory}
 				{resumeRay}
+				{resumeSavedRay}
+				{toggleMusicSaved}
+				{deleteSavedMusicRay}
 				{podcastRayContentLabel}
 				{podcastRaySortLabel}
 			/>
 		{/if}
+
+		{#if currentScreen === "saved"}
+			<RaysPage
+				{libraryMode}
+				{appState}
+				indexing={$indexingState}
+				savedOnly={true}
+				{openPodcastRayHistory}
+				{resumeRay}
+				{resumeSavedRay}
+				{toggleMusicSaved}
+				{togglePodcastSaved}
+				{deleteSavedMusicRay}
+				{podcastRayContentLabel}
+				{podcastRaySortLabel}
+			/>
+		{/if}
+			</div>
+		</div>
 	</div>
 
 	<div slot="player">
@@ -1619,10 +1756,24 @@ $: playerSubline = playingPodcast
 			on:seekCommit={(e) => commitSeek(e.detail)}
 			on:mute={togglePlayerMute}
 			on:volumePreview={(e) => setPlayerVolume(e.detail)}
+			compact={compactMode}
+			resumeSession={appState.resumeSession}
+			canOpenRay={Boolean(appState.musicRay?.id || appState.podcastRay?.id)}
 			on:volumeCommit={(e) => commitVolume(e.detail)}
+			on:compact={toggleCompact}
+			on:openRay={openCurrentRay}
 		/>
 	</div>
 </AppLayout>
+
+<TasksModal
+	open={showTasks}
+	jobs={tasks}
+	reindex={$reindexStatus}
+	close={() => (showTasks = false)}
+	cancelJob={async (id) => { await api.cancelExternalDownload(id); await refreshTasks(); }}
+	retryJob={async (id) => { await api.retryExternalDownload(id); await refreshTasks(); }}
+/>
 
 {#if contextMenu}
     <div

@@ -143,6 +143,15 @@ type RaySummaryRow struct {
 	ResumeLabel      string
 	PositionMs       int
 	Active           bool
+	ContentMode      string
+	SortMode         string
+	IsManualOrder    bool
+	ParentRayID      string
+	Revision         int
+	Kind             string
+	SnapshotKey      string
+	SavedAt          int64
+	Saved            bool
 }
 
 type RayTrackRow struct {
@@ -969,6 +978,21 @@ func (s *Store) migrate() error {
 			definition: "INTEGER NOT NULL DEFAULT 1",
 		},
 		{
+			table:      "rays",
+			column:     "kind",
+			definition: "TEXT NOT NULL DEFAULT 'history'",
+		},
+		{
+			table:      "rays",
+			column:     "snapshot_key",
+			definition: "TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			table:      "rays",
+			column:     "saved_at",
+			definition: "INTEGER NOT NULL DEFAULT 0",
+		},
+		{
 			table:      "ray_tracks",
 			column:     "original_position",
 			definition: "INTEGER NOT NULL DEFAULT 0",
@@ -984,6 +1008,20 @@ func (s *Store) migrate() error {
 		); err != nil {
 			return err
 		}
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_ray_snapshot
+		ON rays(snapshot_key)
+		WHERE kind = 'saved' AND snapshot_key <> ''
+	`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_rays_kind_created
+		ON rays(kind, created_at DESC)
+	`); err != nil {
+		return err
 	}
 
 	// Meta key-value store
@@ -1419,8 +1457,44 @@ func (s *Store) SaveRay(id, name, seedTrackID, currentTrackID, resumeLabel strin
 	return tx.Commit()
 }
 
-func (s *Store) ListRays() ([]RaySummaryRow, error) {
-	rows, err := s.db.Query(`SELECT r.id, r.name, (SELECT COUNT(*) FROM ray_tracks rt WHERE rt.ray_id = r.id), r.current_track_id, COALESCE(t.title, r.name), r.resume_label, r.position_ms, r.active FROM rays r LEFT JOIN tracks t ON t.id = r.current_track_id ORDER BY r.active DESC, r.created_at DESC`)
+func (s *Store) ListRays(kind string) ([]RaySummaryRow, error) {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "history"
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			r.id,
+			r.name,
+			(SELECT COUNT(*) FROM ray_tracks rt WHERE rt.ray_id = r.id),
+			r.current_track_id,
+			COALESCE(t.title, r.name),
+			r.resume_label,
+			r.position_ms,
+			r.active,
+			COALESCE(r.content_mode, 'stable'),
+			COALESCE(r.sort_mode, 'recommended'),
+			COALESCE(r.is_manual_order, 0),
+			COALESCE(r.parent_ray_id, ''),
+			COALESCE(r.revision, 1),
+			COALESCE(r.kind, 'history'),
+			COALESCE(r.snapshot_key, ''),
+			COALESCE(r.saved_at, 0),
+			EXISTS(
+				SELECT 1
+				FROM rays saved
+				WHERE saved.kind = 'saved'
+				  AND saved.snapshot_key <> ''
+				  AND saved.snapshot_key = r.snapshot_key
+			)
+		FROM rays r
+		LEFT JOIN tracks t ON t.id = r.current_track_id
+		WHERE COALESCE(r.kind, 'history') = ?
+		ORDER BY
+			CASE WHEN ? = 'history' THEN r.active ELSE 0 END DESC,
+			CASE WHEN ? = 'saved' THEN r.saved_at ELSE r.created_at END DESC,
+			r.created_at DESC
+	`, kind, kind, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -1428,14 +1502,177 @@ func (s *Store) ListRays() ([]RaySummaryRow, error) {
 	var out []RaySummaryRow
 	for rows.Next() {
 		var r RaySummaryRow
-		var active int
-		if err := rows.Scan(&r.ID, &r.Name, &r.TrackCount, &r.CurrentTrackID, &r.CurrentTrackName, &r.ResumeLabel, &r.PositionMs, &active); err != nil {
+		var active, manual, saved int
+		if err := rows.Scan(
+			&r.ID,
+			&r.Name,
+			&r.TrackCount,
+			&r.CurrentTrackID,
+			&r.CurrentTrackName,
+			&r.ResumeLabel,
+			&r.PositionMs,
+			&active,
+			&r.ContentMode,
+			&r.SortMode,
+			&manual,
+			&r.ParentRayID,
+			&r.Revision,
+			&r.Kind,
+			&r.SnapshotKey,
+			&r.SavedAt,
+			&saved,
+		); err != nil {
 			return nil, err
 		}
 		r.Active = active == 1
+		r.IsManualOrder = manual == 1
+		r.Saved = saved == 1
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+func (s *Store) RaySummaryByID(id string) (RaySummaryRow, error) {
+	var r RaySummaryRow
+	var active, manual, saved int
+	err := s.db.QueryRow(`
+		SELECT
+			r.id,
+			r.name,
+			(SELECT COUNT(*) FROM ray_tracks rt WHERE rt.ray_id = r.id),
+			r.current_track_id,
+			COALESCE(t.title, r.name),
+			r.resume_label,
+			r.position_ms,
+			r.active,
+			COALESCE(r.content_mode, 'stable'),
+			COALESCE(r.sort_mode, 'recommended'),
+			COALESCE(r.is_manual_order, 0),
+			COALESCE(r.parent_ray_id, ''),
+			COALESCE(r.revision, 1),
+			COALESCE(r.kind, 'history'),
+			COALESCE(r.snapshot_key, ''),
+			COALESCE(r.saved_at, 0),
+			EXISTS(
+				SELECT 1 FROM rays saved
+				WHERE saved.kind = 'saved'
+				  AND saved.snapshot_key <> ''
+				  AND saved.snapshot_key = r.snapshot_key
+			)
+		FROM rays r
+		LEFT JOIN tracks t ON t.id = r.current_track_id
+		WHERE r.id = ?
+	`, id).Scan(
+		&r.ID,
+		&r.Name,
+		&r.TrackCount,
+		&r.CurrentTrackID,
+		&r.CurrentTrackName,
+		&r.ResumeLabel,
+		&r.PositionMs,
+		&active,
+		&r.ContentMode,
+		&r.SortMode,
+		&manual,
+		&r.ParentRayID,
+		&r.Revision,
+		&r.Kind,
+		&r.SnapshotKey,
+		&r.SavedAt,
+		&saved,
+	)
+	if err != nil {
+		return RaySummaryRow{}, err
+	}
+	r.Active = active == 1
+	r.IsManualOrder = manual == 1
+	r.Saved = saved == 1
+	return r, nil
+}
+
+func (s *Store) SetRaySnapshotKey(id, snapshotKey string) error {
+	_, err := s.db.Exec(`UPDATE rays SET snapshot_key = ? WHERE id = ?`, snapshotKey, id)
+	return err
+}
+
+func (s *Store) CloneRaySnapshot(sourceID, destID, snapshotKey string) (string, error) {
+	if strings.TrimSpace(snapshotKey) == "" {
+		return "", errors.New("empty ray snapshot key")
+	}
+
+	var existing string
+	err := s.db.QueryRow(`
+		SELECT id FROM rays
+		WHERE kind = 'saved' AND snapshot_key = ?
+		LIMIT 1
+	`, snapshotKey).Scan(&existing)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`
+		INSERT INTO rays(
+			id, name, seed_track_id, current_track_id, resume_label,
+			position_ms, active, created_at, content_mode, sort_mode,
+			is_manual_order, manual_updated_at, parent_ray_id, revision,
+			kind, snapshot_key, saved_at
+		)
+		SELECT
+			?, name, seed_track_id, current_track_id, resume_label,
+			position_ms, 0, unixepoch(), content_mode, sort_mode,
+			is_manual_order, manual_updated_at, id, revision,
+			'saved', ?, unixepoch()
+		FROM rays
+		WHERE id = ?
+	`, destID, snapshotKey, sourceID)
+	if err != nil {
+		return "", err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return "", fmt.Errorf("ray not found: %s", sourceID)
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO ray_tracks(
+			ray_id, track_id, position_index, subtitle, reason,
+			bucket, strategy, score, is_current, original_position
+		)
+		SELECT
+			?, track_id, position_index, subtitle, reason,
+			bucket, strategy, score, is_current, original_position
+		FROM ray_tracks
+		WHERE ray_id = ?
+		ORDER BY position_index
+	`, destID, sourceID); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return destID, nil
+}
+
+func (s *Store) DeleteSavedRayBySnapshotKey(snapshotKey string) error {
+	_, err := s.db.Exec(`
+		DELETE FROM rays
+		WHERE kind = 'saved' AND snapshot_key = ?
+	`, snapshotKey)
+	return err
+}
+
+func (s *Store) DeleteSavedRay(id string) error {
+	_, err := s.db.Exec(`DELETE FROM rays WHERE id = ? AND kind = 'saved'`, id)
+	return err
 }
 
 func (s *Store) GetRayQueue(rayID string) ([]RayTrackRow, error) {

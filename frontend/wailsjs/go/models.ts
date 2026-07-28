@@ -129,6 +129,7 @@ export namespace deps {
 	    essentiaModelDir?: string;
 	    ffmpegPath?: string;
 	    ffprobePath?: string;
+	    ytDlpPath?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsPatch(source);
@@ -141,6 +142,7 @@ export namespace deps {
 	        this.essentiaModelDir = source["essentiaModelDir"];
 	        this.ffmpegPath = source["ffmpegPath"];
 	        this.ffprobePath = source["ffprobePath"];
+	        this.ytDlpPath = source["ytDlpPath"];
 	    }
 	}
 	export class RepairResult {
@@ -519,7 +521,8 @@ export namespace externalmedia {
 	export class Settings {
 	    ytDlpPath: string;
 	    ffmpegPath: string;
-	    ytDlpDownloadDir: string;
+	    musicDownloadDir: string;
+	    podcastDownloadDir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -529,7 +532,8 @@ export namespace externalmedia {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ytDlpPath = source["ytDlpPath"];
 	        this.ffmpegPath = source["ffmpegPath"];
-	        this.ytDlpDownloadDir = source["ytDlpDownloadDir"];
+	        this.musicDownloadDir = source["musicDownloadDir"];
+	        this.podcastDownloadDir = source["podcastDownloadDir"];
 	    }
 	}
 	export class ToolCheckResult {
@@ -891,6 +895,30 @@ export namespace library {
 
 export namespace main {
 	
+	export class ResumeSession {
+	    available: boolean;
+	    libraryMode: string;
+	    trackId: string;
+	    rayId: string;
+	    title: string;
+	    positionMs: number;
+	    position: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ResumeSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.libraryMode = source["libraryMode"];
+	        this.trackId = source["trackId"];
+	        this.rayId = source["rayId"];
+	        this.title = source["title"];
+	        this.positionMs = source["positionMs"];
+	        this.position = source["position"];
+	    }
+	}
 	export class BootstrapPayload {
 	    library: library.Track[];
 	    podcasts: podcast.Item[];
@@ -901,6 +929,8 @@ export namespace main {
 	    current: appstate.PlayerState;
 	    history: events.HistoryItem[];
 	    rays: rays.RaySummary[];
+	    savedRays: rays.RaySummary[];
+	    savedPodcastRayIds: string[];
 	    queue: rays.QueueItem[];
 	    musicRay: rays.Ray;
 	    libraryStat: library.LibraryStats;
@@ -909,6 +939,8 @@ export namespace main {
 	    emoFlow: emoflow.UIState;
 	    emoFlowUiSettings: emoflow.UISettings;
 	    rayBuild: appstate.RayBuildState;
+	    libraryMode: string;
+	    resumeSession: ResumeSession;
 	
 	    static createFrom(source: any = {}) {
 	        return new BootstrapPayload(source);
@@ -925,6 +957,8 @@ export namespace main {
 	        this.current = this.convertValues(source["current"], appstate.PlayerState);
 	        this.history = this.convertValues(source["history"], events.HistoryItem);
 	        this.rays = this.convertValues(source["rays"], rays.RaySummary);
+	        this.savedRays = this.convertValues(source["savedRays"], rays.RaySummary);
+	        this.savedPodcastRayIds = source["savedPodcastRayIds"];
 	        this.queue = this.convertValues(source["queue"], rays.QueueItem);
 	        this.musicRay = this.convertValues(source["musicRay"], rays.Ray);
 	        this.libraryStat = this.convertValues(source["libraryStat"], library.LibraryStats);
@@ -933,6 +967,8 @@ export namespace main {
 	        this.emoFlow = this.convertValues(source["emoFlow"], emoflow.UIState);
 	        this.emoFlowUiSettings = this.convertValues(source["emoFlowUiSettings"], emoflow.UISettings);
 	        this.rayBuild = this.convertValues(source["rayBuild"], appstate.RayBuildState);
+	        this.libraryMode = source["libraryMode"];
+	        this.resumeSession = this.convertValues(source["resumeSession"], ResumeSession);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1072,6 +1108,7 @@ export namespace main {
 	    }
 	}
 	
+	
 	export class RuntimeTestResult {
 	    ok: boolean;
 	    runtimePath: string;
@@ -1090,6 +1127,44 @@ export namespace main {
 	        this.latencyMs = source["latencyMs"];
 	    }
 	}
+	export class SearchSuggestion {
+	    track: library.Track;
+	    score: number;
+	    mood: string;
+	    moodGroup: string;
+	    analyzed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchSuggestion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.track = this.convertValues(source["track"], library.Track);
+	        this.score = source["score"];
+	        this.mood = source["mood"];
+	        this.moodGroup = source["moodGroup"];
+	        this.analyzed = source["analyzed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SettingsPayload {
 	    onnxRuntimePath: string;
 	    miniLMModelDir: string;
@@ -1101,6 +1176,7 @@ export namespace main {
 	    extendRay: boolean;
 	    emoFlowUi: emoflow.UISettings;
 	    normalizePodcastVolume: boolean;
+	    ytDlpPath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsPayload(source);
@@ -1118,6 +1194,7 @@ export namespace main {
 	        this.extendRay = source["extendRay"];
 	        this.emoFlowUi = this.convertValues(source["emoFlowUi"], emoflow.UISettings);
 	        this.normalizePodcastVolume = source["normalizePodcastVolume"];
+	        this.ytDlpPath = source["ytDlpPath"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1581,6 +1658,7 @@ export namespace podcast {
 	    itemCount: number;
 	    createdAt: number;
 	    createdAtLabel: string;
+	    items: RayItem[];
 	
 	    static createFrom(source: any = {}) {
 	        return new RayHistoryItem(source);
@@ -1601,6 +1679,7 @@ export namespace podcast {
 	        this.itemCount = source["itemCount"];
 	        this.createdAt = source["createdAt"];
 	        this.createdAtLabel = source["createdAtLabel"];
+	        this.items = this.convertValues(source["items"], RayItem);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1832,6 +1911,9 @@ export namespace rays {
 	    manualUpdatedAt: number;
 	    parentRayId: string;
 	    revision: number;
+	    kind: string;
+	    snapshotKey: string;
+	    savedAt: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Ray(source);
@@ -1852,6 +1934,9 @@ export namespace rays {
 	        this.manualUpdatedAt = source["manualUpdatedAt"];
 	        this.parentRayId = source["parentRayId"];
 	        this.revision = source["revision"];
+	        this.kind = source["kind"];
+	        this.snapshotKey = source["snapshotKey"];
+	        this.savedAt = source["savedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1881,6 +1966,16 @@ export namespace rays {
 	    resumeLabel: string;
 	    positionMs: number;
 	    active: boolean;
+	    contentMode: string;
+	    sortMode: string;
+	    isManualOrder: boolean;
+	    parentRayId: string;
+	    revision: number;
+	    kind: string;
+	    snapshotKey: string;
+	    savedAt: number;
+	    saved: boolean;
+	    items: QueueItem[];
 	
 	    static createFrom(source: any = {}) {
 	        return new RaySummary(source);
@@ -1896,7 +1991,35 @@ export namespace rays {
 	        this.resumeLabel = source["resumeLabel"];
 	        this.positionMs = source["positionMs"];
 	        this.active = source["active"];
+	        this.contentMode = source["contentMode"];
+	        this.sortMode = source["sortMode"];
+	        this.isManualOrder = source["isManualOrder"];
+	        this.parentRayId = source["parentRayId"];
+	        this.revision = source["revision"];
+	        this.kind = source["kind"];
+	        this.snapshotKey = source["snapshotKey"];
+	        this.savedAt = source["savedAt"];
+	        this.saved = source["saved"];
+	        this.items = this.convertValues(source["items"], QueueItem);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

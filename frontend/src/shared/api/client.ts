@@ -88,12 +88,24 @@ export const api = {
 			: Promise.resolve({
 					ytDlpPath: "yt-dlp",
 					ffmpegPath: "",
-					ytDlpDownloadDir: "",
+					musicDownloadDir: "",
+					podcastDownloadDir: "",
 				}),
 	saveExternalMediaSettings: (settings: Record<string, unknown>) =>
 		hasWails() ? SaveExternalMediaSettings(settings as any) : Promise.resolve(),
 	testYtDlp: (path: string) =>
 		hasWails() ? TestYtDlp(path) : Promise.resolve({ ok: false, error: "Wails runtime unavailable" }),
+	listExternalDownloadJobs: (limit = 50) =>
+		hasWails() ? appCall("ListExternalDownloadJobs", limit) : Promise.resolve([]),
+	setLibraryMode: (mode: string) => (hasWails() ? appCall("SetLibraryMode", mode) : bootstrapFallback()),
+	searchSuggestions: (query: string, mood: string, limit = 5) =>
+		hasWails() ? appCall("SearchSuggestions", query, mood, limit) : Promise.resolve([]),
+	setMusicRaySaved: (rayId: string, saved: boolean) =>
+		hasWails() ? appCall("SetMusicRaySaved", rayId, saved) : bootstrapFallback(),
+	deleteSavedMusicRay: (rayId: string) => (hasWails() ? appCall("DeleteSavedMusicRay", rayId) : bootstrapFallback()),
+	resumeSavedMusicRay: (rayId: string) => (hasWails() ? appCall("ResumeSavedMusicRay", rayId) : bootstrapFallback()),
+	setPodcastRaySaved: (rayId: string, saved: boolean) =>
+		hasWails() ? appCall("SetPodcastRaySaved", rayId, saved) : bootstrapFallback(),
 
 	searchPodcasts: (query: string) => (hasWails() ? SearchPodcasts(query) : Promise.resolve([])),
 	updatePodcastProgress: (itemId: string, position: number, duration: number) =>

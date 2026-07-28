@@ -27,9 +27,18 @@ test("doctor patch only replaces values returned by backend", () => {
 	assert.equal(next.essentiaModelDir, "/managed/essentia");
 });
 
+test("doctor rows contain required dependencies", () => {
+	assert.ok(doctorRows.some((row) => row.id === "ytdlp"));
+});
+
 test("doctor status labels map to the intended actions", () => {
 	assert.equal(doctorStatusLabel({ status: "pending" }), "Проверка");
 	assert.equal(doctorStatusLabel({ status: "ready" }), "Готово");
 	assert.equal(doctorStatusLabel({ status: "repairable" }), "Исправить");
 	assert.equal(doctorStatusLabel({ status: "blocked" }), "Не готово");
+});
+
+test("mergeDoctorPatch applies paths", () => {
+	const withYtDlp = mergeDoctorPatch({}, { ytDlpPath: "/tmp/yt-dlp" });
+	assert.equal(withYtDlp.ytDlpPath, "/tmp/yt-dlp");
 });

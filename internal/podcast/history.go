@@ -41,6 +41,7 @@ type RayHistoryItem struct {
 	ItemCount      int            `json:"itemCount"`
 	CreatedAt      int64          `json:"createdAt"`
 	CreatedAtLabel string         `json:"createdAtLabel"`
+	Items          []RayItem      `json:"items"`
 }
 
 type activeHistory struct {
@@ -207,7 +208,7 @@ func (h *HistoryService) RayList(limit int) ([]RayHistoryItem, error) {
 
 	result := make([]RayHistoryItem, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, RayHistoryItem{
+		entry := RayHistoryItem{
 			ID:             row.Ray.ID,
 			SeedItemID:     row.Ray.SeedItemID,
 			Seed:           itemFromRow(row.Seed),
@@ -221,7 +222,25 @@ func (h *HistoryService) RayList(limit int) ([]RayHistoryItem, error) {
 			ItemCount:      row.ItemCount,
 			CreatedAt:      row.Ray.CreatedAt,
 			CreatedAtLabel: historyTimeLabel(row.Ray.CreatedAt),
-		})
+		}
+		if items, itemErr := h.store.ListPodcastRayItems(row.Ray.ID); itemErr == nil {
+			entry.Items = make([]RayItem, 0, len(items))
+			for _, item := range items {
+				entry.Items = append(entry.Items, RayItem{
+					Item:             itemFromRow(item.Item),
+					Position:         item.PositionIndex,
+					OriginalPosition: item.OriginalPosition,
+					Reason:           item.Reason,
+					Score:            item.Score,
+					SemanticScore:    item.SemanticScore,
+					FolderScore:      item.FolderScore,
+					NoveltyScore:     item.NoveltyScore,
+					ResumeScore:      item.ResumeScore,
+					AddedBy:          item.AddedBy,
+				})
+			}
+		}
+		result = append(result, entry)
 	}
 	return result, nil
 }

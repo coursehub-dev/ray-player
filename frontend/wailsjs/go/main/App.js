@@ -46,6 +46,10 @@ export function DeleteExternalItem(arg1, arg2, arg3) {
   return window['go']['main']['App']['DeleteExternalItem'](arg1, arg2, arg3);
 }
 
+export function DeleteSavedMusicRay(arg1) {
+  return window['go']['main']['App']['DeleteSavedMusicRay'](arg1);
+}
+
 export function DoctorCheck(arg1, arg2) {
   return window['go']['main']['App']['DoctorCheck'](arg1, arg2);
 }
@@ -80,6 +84,10 @@ export function ImportPaths(arg1) {
 
 export function ImportPodcastPaths(arg1) {
   return window['go']['main']['App']['ImportPodcastPaths'](arg1);
+}
+
+export function ListExternalDownloadJobs(arg1) {
+  return window['go']['main']['App']['ListExternalDownloadJobs'](arg1);
 }
 
 export function MovePodcastRayItem(arg1, arg2) {
@@ -146,6 +154,10 @@ export function ResumeRay(arg1) {
   return window['go']['main']['App']['ResumeRay'](arg1);
 }
 
+export function ResumeSavedMusicRay(arg1) {
+  return window['go']['main']['App']['ResumeSavedMusicRay'](arg1);
+}
+
 export function RetryExternalDownload(arg1) {
   return window['go']['main']['App']['RetryExternalDownload'](arg1);
 }
@@ -170,6 +182,10 @@ export function SearchPodcasts(arg1) {
   return window['go']['main']['App']['SearchPodcasts'](arg1);
 }
 
+export function SearchSuggestions(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchSuggestions'](arg1, arg2, arg3);
+}
+
 export function SearchTracks(arg1) {
   return window['go']['main']['App']['SearchTracks'](arg1);
 }
@@ -178,8 +194,16 @@ export function Seek(arg1) {
   return window['go']['main']['App']['Seek'](arg1);
 }
 
+export function SetLibraryMode(arg1) {
+  return window['go']['main']['App']['SetLibraryMode'](arg1);
+}
+
 export function SetMusicRayContentMode(arg1) {
   return window['go']['main']['App']['SetMusicRayContentMode'](arg1);
+}
+
+export function SetMusicRaySaved(arg1, arg2) {
+  return window['go']['main']['App']['SetMusicRaySaved'](arg1, arg2);
 }
 
 export function SetMusicRaySortMode(arg1) {
@@ -192,6 +216,10 @@ export function SetNormalizePodcastVolume(arg1) {
 
 export function SetPodcastRayContentMode(arg1) {
   return window['go']['main']['App']['SetPodcastRayContentMode'](arg1);
+}
+
+export function SetPodcastRaySaved(arg1, arg2) {
+  return window['go']['main']['App']['SetPodcastRaySaved'](arg1, arg2);
 }
 
 export function SetPodcastRaySortMode(arg1) {
