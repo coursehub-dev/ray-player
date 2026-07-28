@@ -1,12 +1,10 @@
 <script lang="ts">
-import { Bookmark, Settings, Mic, Trash2, ChevronDown } from "@lucide/svelte";
-import { IconButton } from "../../shared/ui";
+import { Bookmark, Mic, Trash2 } from "@lucide/svelte";
 
 export let libraryMode: string = "music";
 export let appState: any = {};
 export let indexing: any = {};
 
-export let openSettings: () => void = () => {};
 export let openPodcastRayHistory: (rayId: string) => void = () => {};
 export let resumeRay: (rayId: string) => void = () => {};
 export let resumeSavedRay: (rayId: string) => void = () => {};
@@ -34,7 +32,6 @@ export let podcastRaySortLabel: (mode: string) => string = () => "";
 					? `${indexing.processed}/${indexing.total}`
 					: `${indexing.libraryCount || appState.libraryStat?.tracks || 0} tracks`}
 			</div>
-			<IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton>
 		</div>
 	</div>
 	<div class="screen-body">

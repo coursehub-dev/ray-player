@@ -1846,6 +1846,10 @@ func podcastRayContains(ray podcast.Ray, itemID string) bool {
 func (a *App) SearchTracks(query string) []search.Result { return a.search.Query(query, 50) }
 
 func (a *App) SearchSuggestions(query, moodFilter string, limit int) []SearchSuggestion {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []SearchSuggestion{}
+	}
 	if limit <= 0 || limit > 5 {
 		limit = 5
 	}

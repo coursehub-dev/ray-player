@@ -58,20 +58,7 @@ const dispatch = createEventDispatcher<{
 		<div class="player-now">
 			<div class="cover"></div>
 			<div class="meta">
-				<div class="player-title-row">
-					<strong>{playerTitle}</strong>
-					{#if resumeSession?.available && canOpenRay}
-						<button
-							type="button"
-							class="continue-chip"
-							title={`Открыть сохранённый луч: ${resumeSession.title || playerTitle}`}
-							on:click={() => dispatch("openRay")}
-						>
-							<ListMusic size={12} strokeWidth={1.8} />
-							<span>Продолжить · {resumeSession.position || "0:00"}</span>
-						</button>
-					{/if}
-				</div>
+				<strong class="player-title">{playerTitle}</strong>
 				{#if !playingPodcast && currentTrackMeta}
 					<TrackMetaLine track={currentTrackMeta} maxGenres={2} showBpm={true} />
 				{:else}
@@ -91,6 +78,23 @@ const dispatch = createEventDispatcher<{
 					</small>
 				{/if}
 			</div>
+			{#if canOpenRay}
+				<button
+					type="button"
+					class="player-ray-button"
+					class:resume={resumeSession?.available}
+					aria-label={resumeSession?.available
+						? `Продолжить луч с ${resumeSession.position || "0:00"}`
+						: "Открыть текущий луч"}
+					title={resumeSession?.available
+						? `Продолжить луч с ${resumeSession.position || "0:00"}`
+						: "Открыть текущий луч"}
+					on:click={() => dispatch("openRay")}
+				>
+					<ListMusic size={16} strokeWidth={1.8} />
+					{#if resumeSession?.available}<span class="player-resume-dot"></span>{/if}
+				</button>
+			{/if}
 		</div>
 
 		<div class="transport">

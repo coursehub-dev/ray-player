@@ -1,6 +1,6 @@
 <script lang="ts">
-import { Bookmark, Settings, Play, Pause, GripVertical, Trash2 } from "@lucide/svelte";
-import { IconButton, UIButton } from "../../shared/ui";
+import { Bookmark, Play, Pause, GripVertical, Trash2 } from "@lucide/svelte";
+import { UIButton } from "../../shared/ui";
 import { RayTrackRow } from "../../entities/ray";
 import { PodcastProgressBar } from "../../entities/podcast";
 import { RayBuildSkeleton } from "../../widgets/ray-build-panel";
@@ -27,7 +27,6 @@ export let musicRayUpdating = false;
 export let musicRayDropIndex = -1;
 export let draggedMusicRayIndex = -1;
 
-export let openSettings: () => void = () => {};
 export let toggleInsight: () => void = () => {};
 export let setPodcastContentMode: (mode: string) => void = () => {};
 export let setPodcastSortMode: (mode: string) => void = () => {};
@@ -68,7 +67,17 @@ export let openTrackMenu: (event: MouseEvent | KeyboardEvent, trackId: string, s
 			</div>
 			<div class="top-right-status">
 				<div class="library-status">{(appState.podcastRay?.items || []).length} episodes</div>
-				<IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton>
+				<button
+					type="button"
+					class="ray-save-button"
+					class:active={podcastRaySaved}
+					disabled={!appState.podcastRay?.id}
+					aria-label={podcastRaySaved ? "Убрать луч из сохранённых" : "Сохранить точный снимок луча"}
+					title={podcastRaySaved ? "Убрать луч из сохранённых" : "Сохранить точный снимок луча"}
+					on:click={toggleCurrentRaySaved}
+				>
+					<Bookmark size={15} strokeWidth={1.8} fill={podcastRaySaved ? "currentColor" : "none"} />
+				</button>
 			</div>
 		</div>
 
@@ -213,25 +222,31 @@ export let openTrackMenu: (event: MouseEvent | KeyboardEvent, trackId: string, s
 				</p>
 				<div class="badges" style="margin-top:8px; gap:8px;">
 					<i class="badge emoflow">{emoFlowDirectionLabel}</i>
-					{#if emoFlowEmotionLabel}
-						<span class={`badge emotion emotion-${emoFlowEmotionLabel.replace(/ /g, "-")}`}>
+					{#if emoFlowEmotionLabel}						<span class={`badge emotion emotion-${emoFlowEmotionLabel.replace(/ /g, "-")}`}>
 							{emoFlowEmotionLabel}
 						</span>
-					{/if}								<button type="button" class:active={libraryMode === 'podcast' ? podcastRaySaved : musicRaySaved} class="ray-save-button" on:click={toggleCurrentRaySaved} title="Сохранить луч">
-									Bookmark size={14}
-								</button>
-								<UIButton compact className="badge-height" on:click={toggleInsight}
-						>{showInsight ? "hide insight" : "show insight"}</UIButton
+						{/if}
+					</div>
+				</div>
+				<div class="top-right-status ray-head-actions">					<div class:accent-reactive={indexing.isIndexing} class="library-status">
+						{indexing.isIndexing && indexing.total > 0
+							? `${indexing.processed}/${indexing.total}`
+							: `${indexing.libraryCount || appState.libraryStat?.tracks || 0} tracks`}
+					</div>
+					<button
+						type="button"
+						class="ray-save-button"
+						class:active={musicRaySaved}
+						disabled={!appState.musicRay?.id}
+						aria-label={musicRaySaved ? "Убрать луч из сохранённых" : "Сохранить точный снимок луча"}
+						title={musicRaySaved ? "Убрать луч из сохранённых" : "Сохранить точный снимок луча"}
+						on:click={toggleCurrentRaySaved}
 					>
-				</div>
-			</div>
-			<div class="top-right-status">
-				<div class:accent-reactive={indexing.isIndexing} class="library-status">
-					{indexing.isIndexing && indexing.total > 0
-						? `${indexing.processed}/${indexing.total}`
-						: `${indexing.libraryCount || appState.libraryStat?.tracks || 0} tracks`}
-				</div>
-				<IconButton className="gear-btn" on:click={openSettings} title="Системные настройки"><Settings size={18} strokeWidth={1.8} /></IconButton>
+						<Bookmark size={15} strokeWidth={1.8} fill={musicRaySaved ? "currentColor" : "none"} />
+					</button>
+					<UIButton compact className="ray-insight-toggle" on:click={toggleInsight}>
+						{showInsight ? "скрыть insight" : "insight"}
+					</UIButton>
 			</div>
 		</div>
 		<div class="screen-body">

@@ -20,7 +20,7 @@ import { AddLinkModal, externalDownloads, mergedDownloadState, putExternalDownlo
 import { DoctorModal } from "./pages/settings";
 import { AppLayout } from "./widgets/app-layout";
 import { PlayerBar } from "./widgets/player-bar";
-import { GlobalSearch } from "./widgets/global-search";
+import { GlobalSearch, hasSuggestionQuery } from "./widgets/global-search";
 import { TasksModal } from "./widgets/tasks-modal";
 import { SearchPage } from "./pages/search";
 
@@ -238,6 +238,7 @@ let globalSuggestions = [];
 let globalSearchFocused = false;
 let moodFilter = "";
 let suggestionToken = 0;
+let suggestionTimer = null;
 let tasks = [];
 let compactMode = false;
 let sidebarCollapsed = false;
@@ -330,6 +331,8 @@ const setLibraryMode = async (mode) => {
 		libraryMode = mode;
 		await syncPayload(Promise.resolve(api.setLibraryMode(mode)));
 		query = "";
+		globalSuggestions = [];
+		moodFilter = "";
 		if (!keepScreen) {
 			setScreen("search");
 		}
@@ -723,7 +726,11 @@ const playTrackFromMenu = async () => {
 };
 
 const togglePause = async () => {
+	const resumeTrackId = resumePrompt?.trackId || "";
 	await playbackTogglePause();
+	if (resumeTrackId && resumeTrackId === $playbackState.currentTrackId) {
+		resumePrompt = null;
+	}
 };
 
 const playOrToggle = async (trackId, targetScreen = null) => {
@@ -821,28 +828,64 @@ const toggleCurrentRaySaved = async () => {
 	await toggleMusicSaved(appState.musicRay.id, !currentMusicRaySaved);
 };
 
-const refreshSuggestions = async () => {
+const clearSuggestionTimer = () => {
+	if (suggestionTimer !== null) {
+		clearTimeout(suggestionTimer);
+		suggestionTimer = null;
+	}
+};
+
+const refreshSuggestions = async (requestedQuery = query) => {
+	const normalizedQuery = String(requestedQuery || "").trim();
 	const token = ++suggestionToken;
+	if (!hasSuggestionQuery(normalizedQuery)) {
+		globalSuggestions = [];
+		return;
+	}
 	if (libraryMode === "podcast") {
 		globalSuggestions = (podcastResults || []).slice(0, 5).map((item) => ({ track: item, podcast: true }));
 		return;
 	}
-	const next = await api.searchSuggestions(query, moodFilter, 5);
+	const next = await api.searchSuggestions(normalizedQuery, moodFilter, 5);
 	if (token === suggestionToken) globalSuggestions = Array.isArray(next) ? next : [];
+};
+
+const scheduleSuggestionRefresh = (requestedQuery = query) => {
+	clearSuggestionTimer();
+	if (!hasSuggestionQuery(requestedQuery)) {
+		suggestionToken += 1;
+		globalSuggestions = [];
+		return;
+	}
+	suggestionTimer = setTimeout(() => {
+		suggestionTimer = null;
+		void refreshSuggestions(requestedQuery);
+	}, 120);
 };
 
 const globalSearchInput = async (value) => {
 	await searchCurrentLibrary(value);
-	await refreshSuggestions();
+	scheduleSuggestionRefresh(value);
+};
+
+const focusGlobalSearch = () => {
+	globalSearchFocused = true;
+	scheduleSuggestionRefresh(query);
 };
 
 const selectMood = async (value) => {
 	moodFilter = value;
-	await refreshSuggestions();
+	if (!hasSuggestionQuery(query)) {
+		globalSuggestions = [];
+		return;
+	}
+	await refreshSuggestions(query);
 };
 
 const startSuggestion = async (item) => {
+	clearSuggestionTimer();
 	globalSearchFocused = false;
+	globalSuggestions = [];
 	if (item.podcast) {
 		await togglePodcastRow(item.track.id, false);
 		return;
@@ -885,8 +928,16 @@ const toggleCompact = async () => {
 	restoreWindow = null;
 };
 
-const openCurrentRay = () => {
+const openCurrentRay = async () => {
+	const targetMode = resumePrompt?.available
+		? resumePrompt.libraryMode === "podcast"
+			? "podcast"
+			: "music"
+		: libraryMode;
 	resumePrompt = null;
+	if (targetMode !== libraryMode) {
+		await setLibraryMode(targetMode);
+	}
 	setScreen("ray");
 };
 const addFolder = async () => {
@@ -1658,7 +1709,7 @@ $: playerSubline = playingPodcast
 				taskCount={activeTaskCount}
 				bind:inputEl={searchInputEl}
 				onInput={globalSearchInput}
-				onFocus={() => { globalSearchFocused = true; void refreshSuggestions(); }}
+				onFocus={focusGlobalSearch}
 				onBlur={() => setTimeout(() => (globalSearchFocused = false), 100)}
 				onMood={selectMood}
 				onStart={startSuggestion}
@@ -1709,7 +1760,9 @@ $: playerSubline = playingPodcast
 				{musicRayUpdating}
 				{musicRayDropIndex}
 				{draggedMusicRayIndex}
-				{openSettings}
+				musicRaySaved={currentMusicRaySaved}
+				podcastRaySaved={currentPodcastRaySaved}
+				{toggleCurrentRaySaved}
 				{toggleInsight}
 				{setPodcastContentMode}
 				{setPodcastSortMode}
@@ -1740,11 +1793,11 @@ $: playerSubline = playingPodcast
 				{libraryMode}
 				{appState}
 				indexing={$indexingState}
-				{openSettings}
 				{openPodcastRayHistory}
 				{resumeRay}
 				{resumeSavedRay}
 				{toggleMusicSaved}
+				{togglePodcastSaved}
 				{deleteSavedMusicRay}
 				{podcastRayContentLabel}
 				{podcastRaySortLabel}
@@ -1801,7 +1854,10 @@ $: playerSubline = playingPodcast
 			on:volumePreview={(e) => setPlayerVolume(e.detail)}
 			compact={compactMode}
 			resumeSession={resumePrompt}
-			canOpenRay={Boolean(appState.musicRay?.id || appState.podcastRay?.id)}
+			canOpenRay={Boolean(
+				resumePrompt?.rayId ||
+				(libraryMode === "podcast" ? appState.podcastRay?.id : appState.musicRay?.id),
+			)}
 			on:volumeCommit={(e) => commitVolume(e.detail)}
 			on:compact={toggleCompact}
 			on:openRay={openCurrentRay}

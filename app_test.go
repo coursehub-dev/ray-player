@@ -10,6 +10,20 @@ import (
 	"ray-player1/internal/rays"
 )
 
+func TestSearchSuggestionsRejectsEmptyQuery(t *testing.T) {
+	app := &App{}
+
+	for _, query := range []string{"", " \t\n "} {
+		got := app.SearchSuggestions(query, "", 5)
+		if got == nil {
+			t.Fatalf("SearchSuggestions(%q) returned nil, want empty array", query)
+		}
+		if len(got) != 0 {
+			t.Fatalf("SearchSuggestions(%q) returned %d rows, want 0", query, len(got))
+		}
+	}
+}
+
 func TestPlaybackKindForID(t *testing.T) {
 	tests := []struct {
 		id   string
