@@ -7,7 +7,7 @@ require (
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/madelynnblue/go-dsp v1.0.0
 	github.com/sugarme/tokenizer v0.3.0
-	github.com/wailsapp/wails/v2 v2.14.0
+	github.com/wailsapp/wails/v2 v2.15.0
 	github.com/yalue/onnxruntime_go v1.31.0
 	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.54.0
